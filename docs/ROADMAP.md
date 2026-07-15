@@ -93,14 +93,26 @@ When ideas pour out: **add a line under Step E / parking lot**, don’t change A
 
 ---
 
+### Build monitor (functionality — keep current)
+
+Track and update the Grok Build CLI itself from the desktop shell:
+
+1. Version chip + `grok update --check`  
+2. One-click `grok update` when behind  
+3. Models cache list (for model picker)  
+4. Session / plan folder reveal  
+
+---
+
 ## Current position
 
 | Step | Status |
 |------|--------|
-| A | Done enough for public (CLI chip + loop finish) |
-| B | B1 wrap-up + B2 export shipped; guided setup for cold start |
-| C | Waiting (UI de-clutter) |
-| D | Partially via guided setup; more how-to later |
+| A | Done |
+| B | B1–B3 + session/plan open |
+| C | Primary toolbar + More drawer |
+| D | Start paths + arsenal help + Build monitor teaching |
+| Build monitor | Shipped |
 | E | Parked |
 
 Last updated: 2026-07-15

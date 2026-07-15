@@ -33,7 +33,10 @@ xAI open-sourced the Grok Build harness. The agent is excellent; the default sur
 | **Export notes** | Markdown journal under `.grok-desktop/notes/` |
 | **Resume** | Recent sessions via `session/load` |
 | **Cancel** | Stop an in-flight turn |
-| **CLI ready chip** | Always-visible Grok Build status |
+| **CLI / Build monitor** | Version chip, update check, `grok update`, models list |
+| **Start paths** | Create / Learn / Fix / Interview without prompt skills |
+| **Arsenal prompts** | Plan mode, explore subagents, worktree, review, web/X |
+| **Git safety** | Warns when auto-approve + non-git folder |
 
 ---
 

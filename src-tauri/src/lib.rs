@@ -1,18 +1,46 @@
 mod acp;
+mod build_monitor;
 mod export;
 mod grok;
+mod project;
 
 use acp::{
     AcpState, ConnectOptions, ConnectResult, ConnectionInfo, PermissionReply, PromptResult,
 };
+use build_monitor::BuildMonitor;
 use export::ExportResult;
 use grok::GrokStatus;
+use project::{ProjectInfo, SessionPaths};
 use std::sync::Arc;
 use tauri::State;
 
 #[tauri::command]
 fn grok_status() -> GrokStatus {
     grok::probe()
+}
+
+#[tauri::command]
+async fn build_monitor_report() -> BuildMonitor {
+    tauri::async_runtime::spawn_blocking(build_monitor::monitor)
+        .await
+        .unwrap_or_else(|_| build_monitor::monitor())
+}
+
+#[tauri::command]
+async fn grok_run_update() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(build_monitor::run_update)
+        .await
+        .map_err(|e| format!("update task failed: {e}"))?
+}
+
+#[tauri::command]
+fn project_info(cwd: String) -> Result<ProjectInfo, String> {
+    project::project_info(cwd)
+}
+
+#[tauri::command]
+fn session_paths(cwd: String, session_id: String) -> Result<SessionPaths, String> {
+    project::session_paths(cwd, session_id)
 }
 
 #[tauri::command]
@@ -79,6 +107,10 @@ pub fn run() {
         .manage(Arc::new(AcpState::new()))
         .invoke_handler(tauri::generate_handler![
             grok_status,
+            build_monitor_report,
+            grok_run_update,
+            project_info,
+            session_paths,
             acp_connect,
             acp_prompt,
             acp_cancel,

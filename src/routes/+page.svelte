@@ -3,6 +3,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { fetchGrokStatus } from "$lib/grok";
   import { invoke } from "@tauri-apps/api/core";
+  import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import {
     acpCancel,
     acpConnect,
@@ -16,6 +17,14 @@
     onAcpStatus,
     onAcpUpdate,
   } from "$lib/acp";
+  import {
+    fetchBuildMonitor,
+    fetchProjectInfo,
+    fetchSessionPaths,
+    runGrokUpdate,
+    type BuildMonitor,
+    type ProjectInfo,
+  } from "$lib/build";
   import { loadRecentSessions, saveRecentSession } from "$lib/sessions";
   import {
     getLastCwd,
@@ -25,6 +34,7 @@
   } from "$lib/storage";
   import type { OrchestrationLoop } from "$lib/loops";
   import { buildSessionMarkdown, wrapUpPrompt } from "$lib/notes";
+  import { INTENT_PATHS } from "$lib/paths";
   import {
     accumulateUsage,
     emptyUsage,
@@ -46,6 +56,8 @@
   import GuidedKickoff from "$lib/components/GuidedKickoff.svelte";
   import PermissionModal from "$lib/components/PermissionModal.svelte";
   import OrchestrationPanel from "$lib/components/OrchestrationPanel.svelte";
+  import BuildPanel from "$lib/components/BuildPanel.svelte";
+  import MoreDrawer from "$lib/components/MoreDrawer.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
 
   let status = $state<GrokStatus | null>(null);
@@ -66,16 +78,23 @@
   let items = $state<ChatItem[]>([]);
   let error = $state<string | null>(null);
   let logs = $state<string[]>([]);
-  let showLogs = $state(false);
   let recent = $state<RecentSession[]>([]);
   let usage = $state<UsageSnapshot>(emptyUsage());
 
   let showSetup = $state(false);
   let showKickoff = $state(false);
   let showOrch = $state(false);
+  let showMore = $state(false);
+  let showBuild = $state(false);
+  let showLogs = $state(false);
   let exporting = $state(false);
   let lastExportPath = $state<string | null>(null);
   let permissionReq = $state<PermissionEvent | null>(null);
+  let project = $state<ProjectInfo | null>(null);
+  let buildReport = $state<BuildMonitor | null>(null);
+  let buildLoading = $state(false);
+  let buildUpdating = $state(false);
+  let gitWarnAck = $state(false);
 
   let loopRunning = $state(false);
   let loopStop = $state(false);
@@ -105,6 +124,118 @@
       error = e instanceof Error ? e.message : String(e);
     } finally {
       statusLoading = false;
+    }
+  }
+
+  async function refreshProject() {
+    if (!cwd.trim()) {
+      project = null;
+      return;
+    }
+    try {
+      project = await fetchProjectInfo(cwd.trim());
+    } catch {
+      project = null;
+    }
+  }
+
+  async function refreshBuild() {
+    buildLoading = true;
+    try {
+      buildReport = await fetchBuildMonitor();
+      if (buildReport.models.length && !modelChoice) {
+        /* leave default empty so agent chooses */
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      buildLoading = false;
+    }
+  }
+
+  async function openBuildPanel() {
+    showMore = false;
+    showBuild = true;
+    await refreshBuild();
+  }
+
+  async function doGrokUpdate() {
+    buildUpdating = true;
+    error = null;
+    try {
+      const out = await runGrokUpdate();
+      pushSystem(`grok update:\n${out.slice(0, 500)}`);
+      await refreshBuild();
+      await refreshStatus();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      buildUpdating = false;
+    }
+  }
+
+  async function openSessionFolder() {
+    if (!sessionId || !cwd.trim()) return;
+    try {
+      const paths = await fetchSessionPaths(cwd.trim(), sessionId);
+      if (paths.sessionDir) {
+        await revealItemInDir(paths.sessionDir);
+      } else {
+        error = "Session folder not found yet (connect first, or path encoding mismatch).";
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function openPlanFile() {
+    if (!sessionId || !cwd.trim()) return;
+    try {
+      const paths = await fetchSessionPaths(cwd.trim(), sessionId);
+      const target = paths.planMd ?? paths.summaryJson ?? paths.sessionDir;
+      if (target) {
+        await revealItemInDir(target);
+      } else {
+        error = "No plan.md yet — try arsenal “Enter plan mode” first.";
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  function confirmGitIfNeeded(): boolean {
+    if (project && !project.isGit && alwaysApprove && !gitWarnAck) {
+      const ok = confirm(
+        "This folder is not a git repository, and auto-approve is ON.\n\nGrok can edit/run freely with no easy undo via git.\n\nContinue anyway?",
+      );
+      if (!ok) return false;
+      gitWarnAck = true;
+    }
+    return true;
+  }
+
+  async function runArsenal(text: string) {
+    showMore = false;
+    if (!connected) {
+      error = "Connect first, then use arsenal prompts.";
+      return;
+    }
+    if (busy || loopRunning) return;
+    prompt = text;
+    await sendPrompt();
+  }
+
+  async function startIntent(pathId: string) {
+    const p = INTENT_PATHS.find((x) => x.id === pathId);
+    if (!p) return;
+    if (p.kind === "kickoff") {
+      showKickoff = true;
+      return;
+    }
+    if (p.kind === "loop" && p.loopId) {
+      showOrch = true;
+      // User still enters goal in the loop panel; goal can be prefilled via lastLoopGoal later
+      return;
     }
   }
 
@@ -224,6 +355,8 @@
       if (typeof selected === "string" && selected) {
         cwd = selected;
         setLastCwd(selected);
+        gitWarnAck = false;
+        await refreshProject();
       }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -238,10 +371,14 @@
     resetUsage?: boolean;
   } = {}) {
     error = null;
+    await refreshProject();
+    const aa = opts.alwaysApprove ?? alwaysApprove;
+    if (aa && project && !project.isGit && !opts.resumeSessionId) {
+      if (!confirmGitIfNeeded()) return null;
+    }
     connecting = true;
     streamAssistantId = null;
     streamThoughtId = null;
-    const aa = opts.alwaysApprove ?? alwaysApprove;
     try {
       const res = await acpConnect({
         cwd: cwd.trim(),
@@ -560,6 +697,8 @@
     recent = loadRecentSessions();
     showSetup = !isOnboardingDone();
     await refreshStatus();
+    await refreshProject();
+    refreshBuild(); // background — models list for More drawer
     unlisteners = await Promise.all([
       onAcpUpdate((ev) => handleUpdate(ev.kind, ev.update)),
       onAcpStatus((ev) => {
@@ -630,6 +769,39 @@
   onDismissResult={dismissLoopResult}
 />
 
+<BuildPanel
+  open={showBuild}
+  report={buildReport}
+  loading={buildLoading}
+  updating={buildUpdating}
+  onClose={() => (showBuild = false)}
+  onRefresh={refreshBuild}
+  onUpdate={doGrokUpdate}
+/>
+
+<MoreDrawer
+  open={showMore}
+  connected={connected}
+  bind:alwaysApprove
+  bind:effortChoice
+  bind:modelChoice
+  models={buildReport?.models ?? []}
+  isGit={project?.isGit ?? true}
+  canExport={items.length > 0}
+  canSession={!!sessionId}
+  exporting={exporting}
+  onClose={() => (showMore = false)}
+  onExport={exportNotes}
+  onSetup={() => {
+    showMore = false;
+    showSetup = true;
+  }}
+  onBuild={openBuildPanel}
+  onOpenSession={openSessionFolder}
+  onOpenPlan={openPlanFile}
+  onArsenal={runArsenal}
+/>
+
 <div class="app">
   <header class="header">
     <div class="brand">
@@ -641,8 +813,9 @@
             {connectionMessage || "Connected"}
             {#if modelId}<span class="pill">{modelId}</span>{/if}
             {#if usage.turns > 0}<span class="pill muted-pill">{formatUsage(usage)}</span>{/if}
+            {#if project?.branch}<span class="pill muted-pill">{project.branch}</span>{/if}
           {:else if status?.ready}
-            CLI ready — kickoff, loops, or connect
+            Pick a path below — or Connect to chat
           {:else}
             {status?.message ?? "Checking Grok CLI…"}
           {/if}
@@ -650,52 +823,38 @@
       </div>
     </div>
     <div class="header-actions">
-      <span
+      <button
+        type="button"
         class="cli-chip"
         class:ok={status?.ready}
         class:bad={status && !status.ready}
         class:loading={statusLoading}
-        title={status?.message ?? "Checking Grok Build CLI…"}
+        class:update={buildReport?.update?.updateAvailable}
+        title={buildReport?.update?.updateAvailable
+          ? `Update available: ${buildReport.update.latestVersion}`
+          : (status?.message ?? "Build status")}
+        onclick={openBuildPanel}
       >
         <span class="cli-dot"></span>
         {#if statusLoading && !status}
           CLI…
+        {:else if buildReport?.update?.updateAvailable}
+          Update
         {:else if status?.ready}
-          CLI ready
+          {status.version?.replace(/^grok\s+/i, "").split(" ")[0] ?? "CLI"}
         {:else}
           CLI issue
         {/if}
-      </span>
+      </button>
       <HelpTip title="How this works" label="?">
-        <p>
-          Grok Desktop is a thin shell over the official <strong>Grok Build</strong> CLI via ACP.
-        </p>
+        <p><strong>Grok Desktop</strong> is a thin UI over official Grok Build (ACP).</p>
         <ul>
-          <li><strong>Guided kickoff</strong> — interview → strong first prompt.</li>
-          <li><strong>Loops</strong> — multi-step explore/plan/implement sequences.</li>
-          <li><strong>Connect</strong> — free-form chat on a project folder.</li>
+          <li><strong>Paths</strong> — create, learn, or fix without prompt skills.</li>
+          <li><strong>Loops</strong> — multi-step + automatic wrap-up summary.</li>
+          <li><strong>More</strong> — arsenal prompts, export, Build monitor/updates.</li>
         </ul>
       </HelpTip>
-      <button type="button" class="btn ghost" onclick={() => (showSetup = true)}>Setup</button>
-      <button
-        type="button"
-        class="btn ghost"
-        onclick={exportNotes}
-        disabled={exporting || items.length === 0}
-        title="Save session notes as markdown in the project"
-      >
-        {exporting ? "…" : "Export"}
-      </button>
-      <button
-        type="button"
-        class="btn ghost"
-        onclick={refreshStatus}
-        disabled={statusLoading}
-        title="Re-check Grok CLI install + auth"
-      >
-        {statusLoading ? "…" : "Recheck"}
-      </button>
-      <button type="button" class="btn ghost" onclick={() => (showLogs = !showLogs)}>Logs</button>
+      <button type="button" class="btn ghost" onclick={() => (showMore = true)}>More</button>
     </div>
   </header>
 
@@ -709,7 +868,11 @@
         disabled={connected || connecting}
         placeholder="/absolute/path/to/project"
         spellcheck="false"
-        onchange={() => setLastCwd(cwd)}
+        onchange={() => {
+          setLastCwd(cwd);
+          gitWarnAck = false;
+          refreshProject();
+        }}
       />
       <button
         type="button"
@@ -719,36 +882,13 @@
       >
         Browse…
       </button>
+      {#if project && !project.isGit}
+        <span class="git-badge warn" title="Not a git repository">no git</span>
+      {:else if project?.isGit}
+        <span class="git-badge ok" title={project.branch ?? "git"}>{project.branch ?? "git"}</span>
+      {/if}
     </div>
     <div class="toolbar-actions">
-      <label class="field">
-        <span>Effort</span>
-        <select bind:value={effortChoice} disabled={connected || connecting}>
-          <option value="low">low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option>
-          <option value="xhigh">xhigh</option>
-        </select>
-      </label>
-      <label class="field model-field">
-        <span>Model</span>
-        <input
-          bind:value={modelChoice}
-          disabled={connected || connecting}
-          placeholder="default"
-          spellcheck="false"
-        />
-      </label>
-      <label class="check" class:disabled={connected}>
-        <input type="checkbox" bind:checked={alwaysApprove} disabled={connected || connecting} />
-        Auto-approve
-        <HelpTip title="Auto-approve" label="?">
-          <p>
-            When on, tools run without asking (faster vibe coding). When off, you’ll get a
-            permission popup if the agent requests one.
-          </p>
-        </HelpTip>
-      </label>
       <button
         type="button"
         class="btn accent"
@@ -781,6 +921,30 @@
       {/if}
     </div>
   </section>
+
+  {#if !connected}
+    <section class="paths" aria-label="How do you want to work">
+      <span class="paths-label">Start</span>
+      {#each INTENT_PATHS as p}
+        <button
+          type="button"
+          class="path-chip"
+          disabled={!status?.ready}
+          title={p.blurb}
+          onclick={() => startIntent(p.id)}
+        >
+          {p.title}
+        </button>
+      {/each}
+    </section>
+  {/if}
+
+  {#if project && !project.isGit && alwaysApprove}
+    <div class="banner warn-banner" role="status">
+      Auto-approve is on and this folder is <strong>not git</strong>. Prefer
+      <code>git init</code> or turn off auto-approve in More.
+    </div>
+  {/if}
 
   {#if !connected && recent.length > 0}
     <section class="recent" aria-label="Recent sessions">
@@ -820,11 +984,12 @@
       <div class="empty">
         <h2>Build with Grok — without fighting the terminal</h2>
         <p>
-          New here? Use <strong>Kickoff</strong> (interview) or <strong>Loops</strong> (explore →
-          plan → implement → verify).
+          Choose a <strong>Start</strong> path above (create / learn / fix), or open
+          <strong>More</strong> for Build updates, arsenal prompts, and export.
         </p>
         <p class="muted">
-          Or <strong>Browse…</strong> → <strong>Connect</strong> → free-form chat.
+          Tip: click the green version chip anytime to open <strong>Build monitor</strong>
+          (update CLI, see models).
         </p>
         <div class="empty-actions">
           <button
@@ -843,6 +1008,7 @@
           >
             Run a loop
           </button>
+          <button type="button" class="btn" onclick={openBuildPanel}>Build monitor</button>
         </div>
       </div>
     {:else}
@@ -1006,8 +1172,9 @@
     border: 1px solid #2a3344;
     background: #151922;
     color: #8b93a7;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    font-family: inherit;
   }
 
   .cli-chip.ok {
@@ -1020,6 +1187,12 @@
     color: #fca5a5;
     border-color: #7f1d1d;
     background: #3f1d1d;
+  }
+
+  .cli-chip.update {
+    color: #fde68a;
+    border-color: #854d0e;
+    background: #2a2110;
   }
 
   .cli-dot {
@@ -1038,31 +1211,74 @@
     background: #f87171;
   }
 
+  .cli-chip.update .cli-dot {
+    background: #fbbf24;
+  }
+
   .cli-chip.loading {
     opacity: 0.75;
   }
 
-  .field {
-    display: inline-flex;
+  .paths {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.3rem;
-    font-size: 0.75rem;
+    gap: 0.4rem;
+    padding: 0.45rem 1.1rem;
+    border-bottom: 1px solid #1e2430;
+    background: #0e1218;
+  }
+
+  .paths-label {
+    font-size: 0.72rem;
+    color: #8b93a7;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .path-chip {
+    border: 1px solid #2a3344;
+    background: #151922;
+    color: #e8eaed;
+    border-radius: 999px;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+
+  .path-chip:hover:not(:disabled) {
+    border-color: #3b82f6;
+    background: #1a2744;
+  }
+
+  .path-chip:disabled {
+    opacity: 0.45;
+  }
+
+  .git-badge {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid #2a3344;
     color: #8b93a7;
   }
 
-  .field select,
-  .field input {
-    background: #0d0f12;
-    border: 1px solid #2a3344;
-    border-radius: 6px;
-    color: #e8eaed;
-    padding: 0.3rem 0.4rem;
-    font-size: 0.78rem;
+  .git-badge.ok {
+    color: #86efac;
+    border-color: #166534;
   }
 
-  .model-field input {
-    width: 7.5rem;
-    font-family: ui-monospace, Menlo, monospace;
+  .git-badge.warn {
+    color: #fde68a;
+    border-color: #854d0e;
+  }
+
+  .warn-banner {
+    background: #2a2110;
+    color: #fde68a;
+    border-bottom: 1px solid #854d0e;
+    padding: 0.45rem 1.1rem;
+    font-size: 0.82rem;
   }
 
   .empty-actions {
@@ -1137,19 +1353,6 @@
     align-items: center;
     gap: 0.5rem;
     justify-content: flex-end;
-  }
-
-  .check {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: 0.8rem;
-    color: #c5cad6;
-    margin-right: auto;
-  }
-
-  .check.disabled {
-    opacity: 0.6;
   }
 
   .recent {
