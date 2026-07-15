@@ -5,7 +5,10 @@ export type GrokStatus = {
   authenticated: boolean;
   message: string;
   ready: boolean;
+  authSource?: string | null;
 };
+
+export type LoopPhase = "idle" | "running" | "complete" | "stopped";
 
 export type ConnectOptions = {
   cwd: string;

@@ -71,6 +71,10 @@ No model call is required for the interview — pure product logic so it stays f
 - CLI: `curl -fsSL https://x.ai/cli/install.sh | bash`  
 - Optional: `GROK_BINARY=/path/to/grok`
 
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for ordered steps (reliability → finish-the-job → UI de-clutter → how-to → starter packs). Starter project templates are parked until the core path is solid.
+
 ## Portfolio framing
 
 > Desktop ACP client for xAI Grok Build (Tauri/Svelte): guided onboarding, streaming tool traces, session resume, and interactive permission UX over the Agent Client Protocol — so anyone can use a production coding agent without living in a TUI.

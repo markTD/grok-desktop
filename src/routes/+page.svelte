@@ -34,6 +34,7 @@
     GrokStatus,
     KickoffAnswers,
     KickoffPlan,
+    LoopPhase,
     PermissionEvent,
     RecentSession,
   } from "$lib/types";
@@ -76,6 +77,9 @@
   let loopStop = $state(false);
   let loopStepIndex = $state(-1);
   let activeLoopId = $state<string | null>(null);
+  let loopPhase = $state<LoopPhase>("idle");
+  let lastLoopName = $state<string | null>(null);
+  let lastLoopGoal = $state<string | null>(null);
 
   let scrollEl: HTMLElement | undefined = $state();
   let unlisteners: UnlistenFn[] = [];
@@ -306,6 +310,7 @@
     error = null;
     loopStop = true;
     loopRunning = false;
+    loopPhase = "idle";
     activeLoopId = null;
     loopStepIndex = -1;
     try {
@@ -393,7 +398,10 @@
     loopStop = false;
     showOrch = true;
     activeLoopId = loop.id;
+    lastLoopName = loop.name;
+    lastLoopGoal = goal;
     loopRunning = true;
+    loopPhase = "running";
     loopStepIndex = 0;
 
     if (!connected) {
@@ -404,6 +412,7 @@
       });
       if (!res) {
         loopRunning = false;
+        loopPhase = "idle";
         activeLoopId = null;
         loopStepIndex = -1;
         return;
@@ -415,39 +424,64 @@
       {
         id: nid("loop"),
         role: "loop",
-        text: `Loop: ${loop.name} — ${goal}`,
+        text: `▶ Starting loop: ${loop.name}\nGoal: ${goal}\nSteps: ${loop.steps.map((s) => s.label).join(" → ")}`,
       },
     ];
 
     const completed: string[] = [];
+    let finishedAll = false;
     for (let i = 0; i < loop.steps.length; i++) {
-      if (loopStop) {
-        pushSystem("Loop stopped");
-        break;
-      }
+      if (loopStop) break;
       loopStepIndex = i;
       const step = loop.steps[i];
-      pushSystem(`Loop step ${i + 1}/${loop.steps.length}: ${step.label}`);
+      pushSystem(`Loop · step ${i + 1} of ${loop.steps.length}: ${step.label}`);
       const stepPrompt = step.buildPrompt(goal, completed);
       const ok = await runPromptTurn(stepPrompt);
-      if (!ok || loopStop) {
-        pushSystem("Loop stopped");
-        break;
-      }
+      if (!ok || loopStop) break;
       completed.push(step.label);
     }
 
-    if (!loopStop && completed.length === loop.steps.length) {
-      pushSystem(`Loop complete: ${loop.name}`);
-    }
+    finishedAll = !loopStop && completed.length === loop.steps.length;
     loopRunning = false;
-    loopStepIndex = -1;
-    activeLoopId = null;
+
+    if (finishedAll) {
+      loopPhase = "complete";
+      loopStepIndex = loop.steps.length;
+      items = [
+        ...items,
+        {
+          id: nid("loop"),
+          role: "loop",
+          text: `✓ LOOP FINISHED — ${loop.name}\nGoal: ${goal}\nCompleted: ${completed.join(" → ")}\n\nYou can keep chatting in this session, or open Loops again for another run.`,
+        },
+      ];
+      await scrollToBottom();
+      showOrch = true;
+    } else {
+      loopPhase = "stopped";
+      items = [
+        ...items,
+        {
+          id: nid("loop"),
+          role: "loop",
+          text: `■ Loop stopped — ${loop.name}\nFinished steps: ${completed.length ? completed.join(" → ") : "none"}`,
+        },
+      ];
+      await scrollToBottom();
+      showOrch = true;
+    }
   }
 
   function stopLoop() {
     loopStop = true;
     cancelTurn();
+  }
+
+  function dismissLoopResult() {
+    loopPhase = "idle";
+    activeLoopId = null;
+    loopStepIndex = -1;
+    showOrch = false;
   }
 
   async function replyPermission(optionId: string | null, cancelled = false) {
@@ -526,13 +560,19 @@
   connected={connected}
   busy={busy}
   loopRunning={loopRunning}
+  loopPhase={loopPhase}
   currentStepIndex={loopStepIndex}
   activeLoopId={activeLoopId}
+  lastLoopName={lastLoopName}
+  lastLoopGoal={lastLoopGoal}
   onClose={() => {
-    if (!loopRunning) showOrch = false;
+    if (loopPhase === "running") return;
+    if (loopPhase === "complete" || loopPhase === "stopped") dismissLoopResult();
+    else showOrch = false;
   }}
   onStart={startLoop}
   onStop={stopLoop}
+  onDismissResult={dismissLoopResult}
 />
 
 <div class="app">
@@ -555,6 +595,22 @@
       </div>
     </div>
     <div class="header-actions">
+      <span
+        class="cli-chip"
+        class:ok={status?.ready}
+        class:bad={status && !status.ready}
+        class:loading={statusLoading}
+        title={status?.message ?? "Checking Grok Build CLI…"}
+      >
+        <span class="cli-dot"></span>
+        {#if statusLoading && !status}
+          CLI…
+        {:else if status?.ready}
+          CLI ready
+        {:else}
+          CLI issue
+        {/if}
+      </span>
       <HelpTip title="How this works" label="?">
         <p>
           Grok Desktop is a thin shell over the official <strong>Grok Build</strong> CLI via ACP.
@@ -566,8 +622,14 @@
         </ul>
       </HelpTip>
       <button type="button" class="btn ghost" onclick={() => (showOnboarding = true)}>Tour</button>
-      <button type="button" class="btn ghost" onclick={refreshStatus} disabled={statusLoading}>
-        CLI
+      <button
+        type="button"
+        class="btn ghost"
+        onclick={refreshStatus}
+        disabled={statusLoading}
+        title="Re-check Grok CLI install + auth"
+      >
+        {statusLoading ? "…" : "Recheck"}
       </button>
       <button type="button" class="btn ghost" onclick={() => (showLogs = !showLogs)}>Logs</button>
     </div>
@@ -869,6 +931,53 @@
     border-color: #2a3344;
   }
 
+  .cli-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.28rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid #2a3344;
+    background: #151922;
+    color: #8b93a7;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .cli-chip.ok {
+    color: #86efac;
+    border-color: #166534;
+    background: #0f2a1f;
+  }
+
+  .cli-chip.bad {
+    color: #fca5a5;
+    border-color: #7f1d1d;
+    background: #3f1d1d;
+  }
+
+  .cli-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #6b7280;
+  }
+
+  .cli-chip.ok .cli-dot {
+    background: #34d399;
+    box-shadow: 0 0 6px rgba(52, 211, 153, 0.6);
+  }
+
+  .cli-chip.bad .cli-dot {
+    background: #f87171;
+  }
+
+  .cli-chip.loading {
+    opacity: 0.75;
+  }
+
   .field {
     display: inline-flex;
     align-items: center;
@@ -906,6 +1015,12 @@
     border-color: #1e4d3f;
     color: #6ee7b7;
     font-size: 0.85rem;
+    max-width: min(640px, 100%);
+    white-space: pre-wrap;
+  }
+
+  .loop pre {
+    white-space: pre-wrap;
   }
 
   .header-actions {

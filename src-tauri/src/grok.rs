@@ -5,7 +5,11 @@
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+/// Soft timeout for `grok models` so the UI never freezes mid-session.
+const MODELS_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,12 +18,14 @@ pub struct GrokStatus {
     pub binary_path: Option<String>,
     /// Output of `grok --version` (first line), if available.
     pub version: Option<String>,
-    /// True when `grok models` exits 0 (soft auth check used by the CC bridge).
+    /// True when auth looks good (`grok models` or local auth cache).
     pub authenticated: bool,
     /// Human-readable status for the UI.
     pub message: String,
-    /// True when we can spawn ACP sessions (binary found + authenticated).
+    /// True when we can spawn ACP sessions (binary found + auth ok-ish).
     pub ready: bool,
+    /// How auth was determined (for the UI chip tooltip).
+    pub auth_source: Option<String>,
 }
 
 impl GrokStatus {
@@ -30,6 +36,7 @@ impl GrokStatus {
             authenticated: false,
             message: hint.into(),
             ready: false,
+            auth_source: None,
         }
     }
 }
@@ -73,21 +80,45 @@ pub fn probe() -> GrokStatus {
             .filter(|s| !s.is_empty())
     });
 
-    let auth = run_status(&bin, &["models"]);
-    let authenticated = auth.map(|code| code == 0).unwrap_or(false);
+    // Prefer live `grok models`, but never block the desktop UI forever.
+    // While an ACP session is running, `models` can be slow or flaky — fall back
+    // to the local auth cache so the chip stays "ready".
+    let (authenticated, auth_source) = match run_status_timeout(&bin, &["models"], MODELS_TIMEOUT) {
+        Some(0) => (true, Some("models".into())),
+        Some(_) => {
+            if auth_cache_present() {
+                (true, Some("auth-cache".into()))
+            } else {
+                (false, Some("models-failed".into()))
+            }
+        }
+        None => {
+            if auth_cache_present() {
+                (true, Some("auth-cache".into()))
+            } else if version.is_some() {
+                // Binary works; let connect attempt OAuth path rather than hard-block.
+                (true, Some("version-only".into()))
+            } else {
+                (false, Some("timeout".into()))
+            }
+        }
+    };
 
     let (ready, message) = match (version.as_ref(), authenticated) {
-        (Some(v), true) => (
-            true,
-            format!("Ready — {v} (authenticated)"),
-        ),
+        (Some(v), true) => {
+            let src = auth_source.as_deref().unwrap_or("ok");
+            (
+                true,
+                format!("CLI ready — {v} ({src})"),
+            )
+        }
         (Some(v), false) => (
             false,
             format!(
                 "Found {v} at {bin_str}, but auth failed. Run `grok` in a terminal to sign in."
             ),
         ),
-        (None, true) => (true, format!("Ready — {bin_str}")),
+        (None, true) => (true, format!("CLI ready — {bin_str}")),
         (None, false) => (
             false,
             format!(
@@ -102,7 +133,14 @@ pub fn probe() -> GrokStatus {
         authenticated,
         message,
         ready,
+        auth_source,
     }
+}
+
+fn auth_cache_present() -> bool {
+    dirs_home()
+        .map(|h| h.join(".grok").join("auth.json").is_file())
+        .unwrap_or(false)
 }
 
 fn run_capture(bin: &Path, args: &[&str]) -> Result<String, String> {
@@ -121,14 +159,33 @@ fn run_capture(bin: &Path, args: &[&str]) -> Result<String, String> {
     Ok(text)
 }
 
-fn run_status(bin: &Path, args: &[&str]) -> Result<i32, String> {
-    let status = Command::new(bin)
+/// Run a short command; `None` means timeout/spawn failure.
+fn run_status_timeout(bin: &Path, args: &[&str], timeout: Duration) -> Option<i32> {
+    let mut child = Command::new(bin)
         .args(args)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map_err(|e| format!("failed to spawn {}: {e}", bin.display()))?;
-    Ok(status.code().unwrap_or(-1))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status.code().unwrap_or(-1)),
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                return None;
+            }
+        }
+    }
 }
 
 fn which(name: &str) -> Option<PathBuf> {
@@ -162,4 +219,3 @@ fn is_executable(path: &Path) -> bool {
         true
     }
 }
-

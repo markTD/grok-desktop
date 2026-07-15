@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ORCHESTRATION_LOOPS, type OrchestrationLoop } from "$lib/loops";
+  import type { LoopPhase } from "$lib/types";
   import HelpTip from "$lib/components/HelpTip.svelte";
 
   let {
@@ -7,21 +8,29 @@
     connected = false,
     busy = false,
     loopRunning = false,
+    loopPhase = "idle" as LoopPhase,
     currentStepIndex = -1,
     activeLoopId = null as string | null,
+    lastLoopName = null as string | null,
+    lastLoopGoal = null as string | null,
     onClose,
     onStart,
     onStop,
+    onDismissResult,
   }: {
     open?: boolean;
     connected?: boolean;
     busy?: boolean;
     loopRunning?: boolean;
+    loopPhase?: LoopPhase;
     currentStepIndex?: number;
     activeLoopId?: string | null;
+    lastLoopName?: string | null;
+    lastLoopGoal?: string | null;
     onClose: () => void;
     onStart: (loop: OrchestrationLoop, goal: string) => void;
     onStop: () => void;
+    onDismissResult: () => void;
   } = $props();
 
   let selectedId = $state(ORCHESTRATION_LOOPS[0]?.id ?? "ship-feature");
@@ -29,6 +38,14 @@
 
   let selected = $derived(
     ORCHESTRATION_LOOPS.find((l) => l.id === selectedId) ?? ORCHESTRATION_LOOPS[0],
+  );
+
+  let activeLoop = $derived(
+    ORCHESTRATION_LOOPS.find((l) => l.id === activeLoopId) ?? null,
+  );
+
+  let showProgress = $derived(
+    loopPhase === "running" || loopPhase === "complete" || loopPhase === "stopped",
   );
 </script>
 
@@ -38,40 +55,83 @@
       <header>
         <div>
           <p class="eyebrow">Orchestration</p>
-          <h2 id="orch-title">Multi-step loops (token-smart)</h2>
+          <h2 id="orch-title">Multi-step loops</h2>
         </div>
         <div class="head-actions">
           <HelpTip title="Why loops?" label="?">
             <p>
-              Instead of one giant prompt, we run a short sequence (explore → plan → implement →
-              verify). Each step is a normal chat turn, so Grok can use <strong>explore/plan
-              subagents</strong> and keep the main thread focused.
+              Short sequence of turns (explore → plan → implement → verify) instead of one giant
+              prompt. Keeps work focused and encourages Grok to use explore/plan subagents.
             </p>
           </HelpTip>
-          <button type="button" class="x" onclick={onClose} aria-label="Close">×</button>
+          <button
+            type="button"
+            class="x"
+            onclick={onClose}
+            aria-label="Close"
+            disabled={loopPhase === "running"}
+          >
+            ×
+          </button>
         </div>
       </header>
 
-      {#if loopRunning && activeLoopId}
-        <div class="running">
-          <p>
-            Running <strong>{ORCHESTRATION_LOOPS.find((l) => l.id === activeLoopId)?.name}</strong>
-          </p>
+      {#if showProgress && (activeLoop || lastLoopName)}
+        <div class="running" class:done={loopPhase === "complete"} class:stopped={loopPhase === "stopped"}>
+          {#if loopPhase === "complete"}
+            <div class="banner ok" role="status">
+              <strong>✓ Loop finished</strong>
+              <span
+                >{lastLoopName ?? activeLoop?.name}
+                {#if lastLoopGoal}
+                  — {lastLoopGoal}
+                {/if}
+              </span>
+              <p>
+                All steps completed. Scroll the chat for results. You can keep chatting in this
+                session or run another loop.
+              </p>
+            </div>
+          {:else if loopPhase === "stopped"}
+            <div class="banner stop" role="status">
+              <strong>Loop stopped</strong>
+              <span>You can resume by starting a new loop or chatting freely.</span>
+            </div>
+          {:else}
+            <p class="now">
+              Running <strong>{activeLoop?.name}</strong>
+              {#if lastLoopGoal}<span class="goal">· {lastLoopGoal}</span>{/if}
+            </p>
+          {/if}
+
           <ol class="steps">
-            {#each ORCHESTRATION_LOOPS.find((l) => l.id === activeLoopId)?.steps ?? [] as step, i}
+            {#each (activeLoop?.steps ?? ORCHESTRATION_LOOPS.find((l) => l.name === lastLoopName)?.steps ?? []) as step, i}
               <li
-                class:done={i < currentStepIndex}
-                class:active={i === currentStepIndex}
+                class:done={loopPhase === "complete" || i < currentStepIndex || (loopPhase !== "running" && i < currentStepIndex)}
+                class:active={loopPhase === "running" && i === currentStepIndex}
+                class:alldone={loopPhase === "complete"}
               >
-                <span class="idx">{i + 1}</span>
+                <span class="idx">{loopPhase === "complete" || i < currentStepIndex ? "✓" : i + 1}</span>
                 {step.label}
                 {#if step.hint}<span class="hint">· {step.hint}</span>{/if}
               </li>
             {/each}
           </ol>
-          <button type="button" class="btn danger" onclick={onStop} disabled={!loopRunning}>
-            Stop loop
-          </button>
+
+          {#if loopPhase === "running"}
+            <button type="button" class="btn danger" onclick={onStop}>Stop loop</button>
+          {:else}
+            <div class="footer-row">
+              <button type="button" class="btn ghost" onclick={onDismissResult}>Close</button>
+              <button
+                type="button"
+                class="btn primary"
+                onclick={onDismissResult}
+              >
+                Done — back to chat
+              </button>
+            </div>
+          {/if}
         </div>
       {:else}
         <div class="loops">
@@ -182,6 +242,11 @@
     cursor: pointer;
   }
 
+  .x:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+
   .loops {
     display: grid;
     gap: 0.4rem;
@@ -242,7 +307,8 @@
     color: #8b93a7;
   }
 
-  footer {
+  footer,
+  .footer-row {
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
@@ -278,8 +344,45 @@
     background: transparent;
   }
 
-  .running p {
+  .now {
     margin: 0.75rem 0 0.5rem;
+  }
+
+  .goal {
+    color: #8b93a7;
+    font-size: 0.9em;
+  }
+
+  .banner {
+    margin: 0.75rem 0 0.65rem;
+    padding: 0.75rem 0.85rem;
+    border-radius: 10px;
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .banner.ok {
+    background: #0f2a1f;
+    border: 1px solid #166534;
+    color: #bbf7d0;
+  }
+
+  .banner.stop {
+    background: #2a2110;
+    border: 1px solid #854d0e;
+    color: #fde68a;
+  }
+
+  .banner p {
+    margin: 0.35rem 0 0;
+    font-size: 0.82rem;
+    opacity: 0.95;
+    line-height: 1.4;
+  }
+
+  .banner span {
+    font-size: 0.85rem;
+    opacity: 0.9;
   }
 
   .steps {
@@ -300,7 +403,8 @@
     border-radius: 8px;
   }
 
-  .steps li.done {
+  .steps li.done,
+  .steps li.alldone {
     color: #34d399;
   }
 
@@ -317,6 +421,7 @@
     display: inline-grid;
     place-items: center;
     font-size: 0.72rem;
+    flex-shrink: 0;
   }
 
   .hint {
