@@ -97,10 +97,10 @@ When ideas pour out: **add a line under Step E / parking lot**, don’t change A
 
 | Step | Status |
 |------|--------|
-| A | In progress (CLI chip + loop finish) |
-| B | Next |
-| C | Waiting |
-| D | Waiting |
+| A | Done enough for public (CLI chip + loop finish) |
+| B | B1 wrap-up + B2 export shipped; guided setup for cold start |
+| C | Waiting (UI de-clutter) |
+| D | Partially via guided setup; more how-to later |
 | E | Parked |
 
 Last updated: 2026-07-15

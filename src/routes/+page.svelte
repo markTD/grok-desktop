@@ -2,6 +2,7 @@
   import { onDestroy, onMount, tick } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import { fetchGrokStatus } from "$lib/grok";
+  import { invoke } from "@tauri-apps/api/core";
   import {
     acpCancel,
     acpConnect,
@@ -23,6 +24,7 @@
     setOnboardingDone,
   } from "$lib/storage";
   import type { OrchestrationLoop } from "$lib/loops";
+  import { buildSessionMarkdown, wrapUpPrompt } from "$lib/notes";
   import {
     accumulateUsage,
     emptyUsage,
@@ -40,7 +42,7 @@
   } from "$lib/types";
   import type { UnlistenFn } from "@tauri-apps/api/event";
   import HelpTip from "$lib/components/HelpTip.svelte";
-  import Onboarding from "$lib/components/Onboarding.svelte";
+  import GuidedSetup from "$lib/components/GuidedSetup.svelte";
   import GuidedKickoff from "$lib/components/GuidedKickoff.svelte";
   import PermissionModal from "$lib/components/PermissionModal.svelte";
   import OrchestrationPanel from "$lib/components/OrchestrationPanel.svelte";
@@ -68,9 +70,11 @@
   let recent = $state<RecentSession[]>([]);
   let usage = $state<UsageSnapshot>(emptyUsage());
 
-  let showOnboarding = $state(false);
+  let showSetup = $state(false);
   let showKickoff = $state(false);
   let showOrch = $state(false);
+  let exporting = $state(false);
+  let lastExportPath = $state<string | null>(null);
   let permissionReq = $state<PermissionEvent | null>(null);
 
   let loopRunning = $state(false);
@@ -442,17 +446,24 @@
     }
 
     finishedAll = !loopStop && completed.length === loop.steps.length;
+
+    if (finishedAll && !loopStop) {
+      pushSystem(`Loop · wrap-up: summarizing what shipped`);
+      loopStepIndex = loop.steps.length;
+      await runPromptTurn(wrapUpPrompt(loop.name, goal, completed));
+    }
+
     loopRunning = false;
 
-    if (finishedAll) {
+    if (finishedAll && !loopStop) {
       loopPhase = "complete";
-      loopStepIndex = loop.steps.length;
+      loopStepIndex = loop.steps.length + 1;
       items = [
         ...items,
         {
           id: nid("loop"),
           role: "loop",
-          text: `✓ LOOP FINISHED — ${loop.name}\nGoal: ${goal}\nCompleted: ${completed.join(" → ")}\n\nYou can keep chatting in this session, or open Loops again for another run.`,
+          text: `✓ LOOP FINISHED — ${loop.name}\nGoal: ${goal}\nCompleted: ${completed.join(" → ")} → Wrap-up\n\nTip: click Export notes to save a markdown journal in your project (.grok-desktop/notes/).`,
         },
       ];
       await scrollToBottom();
@@ -469,6 +480,40 @@
       ];
       await scrollToBottom();
       showOrch = true;
+    }
+  }
+
+  async function exportNotes() {
+    if (!cwd.trim() || items.length === 0) {
+      error = "Nothing to export yet — run a chat or loop first.";
+      return;
+    }
+    exporting = true;
+    error = null;
+    try {
+      const markdown = buildSessionMarkdown({
+        cwd: cwd.trim(),
+        sessionId,
+        modelId,
+        usage,
+        items,
+        loopName: lastLoopName,
+        loopGoal: lastLoopGoal,
+      });
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      const res = await invoke<{ path: string }>("export_session_notes", {
+        cwd: cwd.trim(),
+        markdown,
+        suggestedName: lastLoopName
+          ? `loop-${lastLoopName.toLowerCase().replace(/\s+/g, "-")}-${stamp}`
+          : `session-${stamp}`,
+      });
+      lastExportPath = res.path;
+      pushSystem(`Notes exported → ${res.path}`);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      exporting = false;
     }
   }
 
@@ -506,14 +551,14 @@
     }
   }
 
-  function finishOnboarding() {
+  function finishSetup() {
     setOnboardingDone();
-    showOnboarding = false;
+    showSetup = false;
   }
 
   onMount(async () => {
     recent = loadRecentSessions();
-    showOnboarding = !isOnboardingDone();
+    showSetup = !isOnboardingDone();
     await refreshStatus();
     unlisteners = await Promise.all([
       onAcpUpdate((ev) => handleUpdate(ev.kind, ev.update)),
@@ -543,8 +588,18 @@
   });
 </script>
 
-{#if showOnboarding}
-  <Onboarding onDone={finishOnboarding} />
+{#if showSetup}
+  <GuidedSetup
+    status={status}
+    statusLoading={statusLoading}
+    cwd={cwd}
+    onRecheck={refreshStatus}
+    onPickFolder={pickFolder}
+    onDone={finishSetup}
+    onKickoff={() => (showKickoff = true)}
+    onLoops={() => (showOrch = true)}
+    onConnect={() => connect()}
+  />
 {/if}
 
 <GuidedKickoff
@@ -621,7 +676,16 @@
           <li><strong>Connect</strong> — free-form chat on a project folder.</li>
         </ul>
       </HelpTip>
-      <button type="button" class="btn ghost" onclick={() => (showOnboarding = true)}>Tour</button>
+      <button type="button" class="btn ghost" onclick={() => (showSetup = true)}>Setup</button>
+      <button
+        type="button"
+        class="btn ghost"
+        onclick={exportNotes}
+        disabled={exporting || items.length === 0}
+        title="Save session notes as markdown in the project"
+      >
+        {exporting ? "…" : "Export"}
+      </button>
       <button
         type="button"
         class="btn ghost"
