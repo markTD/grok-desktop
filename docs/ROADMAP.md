@@ -111,8 +111,9 @@ Track and update the Grok Build CLI itself from the desktop shell:
 | A | Done |
 | B | B1–B3 + session/plan open |
 | C | Primary toolbar + More drawer |
-| D | Start paths + arsenal help + Build monitor teaching |
+| D | Start paths + arsenal + trust center (data status / harness) |
 | Build monitor | Shipped |
+| Trust / safety UX | Status board + guardrails tabs (iterate on clarity) |
 | E | Parked |
 
 Last updated: 2026-07-15

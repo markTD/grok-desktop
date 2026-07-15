@@ -833,6 +833,7 @@
   open={showSafety}
   alwaysApprove={alwaysApprove}
   isGit={project?.isGit ?? true}
+  connected={connected}
   onClose={() => (showSafety = false)}
   onAck={ackSafety}
   onSafeExplore={safeExplore}

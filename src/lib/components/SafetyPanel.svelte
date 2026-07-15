@@ -18,6 +18,7 @@
     open = false,
     alwaysApprove = false,
     isGit = true,
+    connected = false,
     onClose,
     onAck,
     onSafeExplore,
@@ -25,11 +26,13 @@
     open?: boolean;
     alwaysApprove?: boolean;
     isGit?: boolean;
+    connected?: boolean;
     onClose: () => void;
     onAck?: () => void;
     onSafeExplore?: () => void;
   } = $props();
 
+  let tab = $state<"status" | "guardrails" | "controls">("status");
   let snap = $state<PrivacySnapshot | null>(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
@@ -47,15 +50,24 @@
   }
 
   $effect(() => {
-    if (open) load();
+    if (open) {
+      tab = "status";
+      load();
+    }
   });
 
-  async function openPrivacyDocs() {
+  async function openCliDocs() {
     try {
       await openUrl("https://x.ai/cli");
     } catch {
       /* ignore */
     }
+  }
+
+  function flagLabel(v: boolean | null | undefined, on = "On", off = "Off"): string {
+    if (v === true) return on;
+    if (v === false) return off;
+    return "Unknown";
   }
 </script>
 
@@ -64,133 +76,283 @@
     <div class="card">
       <header>
         <div>
-          <p class="eyebrow">Transparency</p>
-          <h2 id="safety-title">Data & safety</h2>
+          <p class="eyebrow">Trust center</p>
+          <h2 id="safety-title">Data status · harness · guardrails</h2>
         </div>
         <button type="button" class="x" onclick={onClose} aria-label="Close">×</button>
       </header>
 
       <p class="lead">
-        Read this once before exploring other people’s machines of… wait, <em>your</em> machine.
-        Coding agents are powerful. Here’s what Grok Desktop does — and what it doesn’t.
+        Plain answers for normal people. <strong>Grok Desktop does not run its own cloud.</strong>
+        The AI still needs the internet through the official <strong>Grok Build</strong> app from
+        xAI — so some project content can leave your computer when the agent works.
       </p>
 
-      <section>
-        <h3>What leaves this computer</h3>
-        <ul>
-          <li>
-            <strong>Prompts, answers, and files the agent reads/edits</strong> may go to
-            <strong>xAI</strong> via the official Grok Build CLI (required for the model to work).
-          </li>
-          <li>
-            <strong>MCP / plugins</strong> you enabled in <code>~/.grok</code> can call third-party
-            services (their policies apply).
-          </li>
-          <li>
-            Optional Grok Build <strong>telemetry / traces</strong> depend on CLI config (see status
-            below) and account settings.
-          </li>
-        </ul>
-      </section>
+      <nav class="tabs" aria-label="Safety sections">
+        <button type="button" class:on={tab === "status"} onclick={() => (tab = "status")}>
+          1. Data status
+        </button>
+        <button
+          type="button"
+          class:on={tab === "guardrails"}
+          onclick={() => (tab = "guardrails")}
+        >
+          2. Harness & guardrails
+        </button>
+        <button type="button" class:on={tab === "controls"} onclick={() => (tab = "controls")}>
+          3. Your controls
+        </button>
+      </nav>
 
-      <section>
-        <h3>What stays local</h3>
-        <ul>
-          <li>This app’s UI preferences (folder, recent sessions list).</li>
-          <li>
-            Grok sessions under <code>~/.grok/sessions/</code>
-            {#if snap?.sessionsDirPresent}
-              <span class="ok"> · present</span>
-            {/if}
-          </li>
-          <li>
-            Notes only if you click <strong>Export</strong> →
-            <code>.grok-desktop/notes/</code> in your project.
-          </li>
-          <li>No separate “Grok Desktop cloud” account or backend of ours.</li>
-        </ul>
-      </section>
+      {#if tab === "status"}
+        <section>
+          <h3>Will it send my whole codebase?</h3>
+          <div class="answer-card yellow">
+            <div class="badge">Not all at once · not by default as a zip</div>
+            <p>
+              There is <strong>no “upload entire project” button</strong> in Grok Desktop.
+              When you chat, Grok Build sends what the <strong>model needs for that turn</strong>:
+              your messages, plus <strong>files and tool results it chooses to read</strong>
+              (and edits it makes). Over a long session, that can cover a large part of a project
+              — treat it like a remote coworker who can open files you allow tools to touch.
+            </p>
+          </div>
 
-      <section>
-        <h3>Local Grok Build snapshot</h3>
-        {#if loading}
-          <p class="muted">Reading config…</p>
-        {:else if error}
-          <p class="bad">{error}</p>
-        {:else if snap}
-          <dl>
-            <div>
-              <dt>Auth cache</dt>
-              <dd>{snap.authCachePresent ? "present (~/.grok/auth.json)" : "not found"}</dd>
-            </div>
-            <div>
-              <dt>Telemetry (config)</dt>
-              <dd>
-                {#if snap.telemetryEnabled === null}
-                  unknown — check config / TUI /privacy
-                {:else}
-                  {snap.telemetryEnabled ? "ON" : "OFF"}
-                {/if}
-              </dd>
-            </div>
-            <div>
-              <dt>Trace upload (config)</dt>
-              <dd>
-                {#if snap.traceUpload === null}
-                  unset / inherit
-                {:else}
-                  {snap.traceUpload ? "ON" : "OFF"}
-                {/if}
-              </dd>
-            </div>
-            <div>
-              <dt>CLI permission mode</dt>
-              <dd>{snap.configPermissionMode ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>Config file</dt>
-              <dd><code>{snap.configPath ?? "—"}</code></dd>
-            </div>
-          </dl>
-          <ul class="summary">
-            {#each snap.summaryLines as line}
-              <li>{line}</li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
+          <h3 class="mt">Live status board</h3>
+          <div class="board">
+            <article class="row-card red">
+              <header>
+                <span class="dot"></span>
+                <strong>Your chat &amp; answers</strong>
+                <em>Goes to xAI</em>
+              </header>
+              <p>
+                Required for the model to work. Same idea as using grok.com or the Grok Build TUI.
+              </p>
+            </article>
 
-      <section>
-        <h3>Safer exploring (checklist)</h3>
-        <ul class="check">
-          <li class:bad={alwaysApprove} class:ok={!alwaysApprove}>
-            Auto-approve tools is <strong>{alwaysApprove ? "ON — careful" : "OFF — safer"}</strong>
-          </li>
-          <li class:bad={!isGit} class:ok={isGit}>
-            Project is {isGit ? "a git repo (good)" : "not git — hard to undo edits"}
-          </li>
-          <li>Use a dedicated project folder, not your whole home directory.</li>
-          <li>Don’t leave live API keys in the tree if you can avoid it.</li>
-          <li>
-            For account retention: open Grok TUI and run <code>/privacy</code>.
-          </li>
-        </ul>
-      </section>
+            <article class="row-card red">
+              <header>
+                <span class="dot"></span>
+                <strong>Files the agent reads or edits</strong>
+                <em>Can go to xAI</em>
+              </header>
+              <p>
+                When tools open <code>src/…</code>, configs, logs, etc., that content may be
+                included in model traffic. Secrets in the project can leak this way.
+              </p>
+            </article>
 
-      <section class="actions-block">
-        {#if onSafeExplore}
-          <button type="button" class="btn accent" onclick={onSafeExplore}>
-            Safe explore mode
-          </button>
-          <p class="muted small">
-            Turns auto-approve off and starts a read-heavy “learn this repo” style path.
+            <article class="row-card yellow">
+              <header>
+                <span class="dot"></span>
+                <strong>Shell commands &amp; tool output</strong>
+                <em>Can go to xAI</em>
+              </header>
+              <p>
+                Command results the agent runs (tests, git status, etc.) can be sent back into the
+                model context.
+              </p>
+            </article>
+
+            <article class="row-card yellow">
+              <header>
+                <span class="dot"></span>
+                <strong>MCP / plugins (if enabled)</strong>
+                <em>Third parties</em>
+              </header>
+              <p>
+                Anything under <code>~/.grok</code> plugins/MCP (Vercel, Sentry, …) can send data
+                to those services. Review what you installed.
+              </p>
+            </article>
+
+            <article class="row-card" class:green={snap?.telemetryEnabled === false} class:yellow={snap?.telemetryEnabled !== false}>
+              <header>
+                <span class="dot"></span>
+                <strong>Anonymous telemetry (Grok Build config)</strong>
+                <em>{flagLabel(snap?.telemetryEnabled)}</em>
+              </header>
+              <p>
+                CLI setting <code>[features] telemetry</code>. This is separate from “sending code
+                for the model.” Refresh after you change config.
+              </p>
+            </article>
+
+            <article class="row-card" class:green={snap?.traceUpload === false} class:yellow={snap?.traceUpload !== false}>
+              <header>
+                <span class="dot"></span>
+                <strong>Session/trace upload (config)</strong>
+                <em>{flagLabel(snap?.traceUpload, "On/possible", "Off")}</em>
+              </header>
+              <p>
+                <code>[telemetry] trace_upload</code> in Grok config. If unknown, open config or the
+                official TUI.
+              </p>
+            </article>
+
+            <article class="row-card green">
+              <header>
+                <span class="dot"></span>
+                <strong>Grok Desktop “cloud product”</strong>
+                <em>None</em>
+              </header>
+              <p>
+                This open-source app does not run a backend that receives your repo. No separate
+                Grok Desktop account.
+              </p>
+            </article>
+
+            <article class="row-card green">
+              <header>
+                <span class="dot"></span>
+                <strong>Chat history on disk (local)</strong>
+                <em>Stays here</em>
+              </header>
+              <p>
+                Official CLI stores sessions under <code>~/.grok/sessions/</code>
+                {#if snap?.sessionsDirPresent}<span class="pill">found</span>{/if}. Export notes
+                only if you click Export.
+              </p>
+            </article>
+          </div>
+
+          {#if loading}
+            <p class="muted">Refreshing local config…</p>
+          {:else if error}
+            <p class="bad">{error}</p>
+          {/if}
+
+          <p class="note">
+            <strong>Account / training / retention</strong> (how long xAI keeps coding data) is set
+            by your <strong>SuperGrok / X plan and xAI policy</strong>, not by this app. In the
+            official Grok Build terminal, run <code>/privacy</code> for the source-of-truth
+            toggles. We show config we can read on disk; we cannot read every account setting.
           </p>
-        {/if}
-        <div class="row">
-          <button type="button" class="btn" onclick={openPrivacyDocs}>x.ai/cli docs</button>
-          <button type="button" class="btn" onclick={load} disabled={loading}>Refresh</button>
-        </div>
-      </section>
+        </section>
+      {:else if tab === "guardrails"}
+        <section>
+          <h3>Three layers of the harness</h3>
+          <p class="muted small">
+            Think of a seatbelt + airbag + driver: each layer does a different job. None of them
+            make the AI “offline.”
+          </p>
+
+          <div class="layers">
+            <article class="layer">
+              <h4>1 · Grok Desktop (this app)</h4>
+              <ul>
+                <li>Shows you tools, thoughts, and status instead of a blank terminal.</li>
+                <li>Default: <strong>auto-approve off</strong> (you stay in the loop when the agent asks).</li>
+                <li>Warns if the folder is <strong>not git</strong> and auto-approve is on.</li>
+                <li>Guided setup + Safety screen so first-time users see data facts first.</li>
+                <li>Export notes only on purpose; no silent “desktop cloud” upload of our own.</li>
+              </ul>
+              <p class="layer-lim">
+                Limit: we cannot stop xAI from receiving model traffic once you Connect. We only
+                wrap the official CLI.
+              </p>
+            </article>
+
+            <article class="layer">
+              <h4>2 · Grok Build CLI (xAI harness)</h4>
+              <ul>
+                <li>Real agent: file tools, shell, web, MCP, subagents, plan mode, sandbox options.</li>
+                <li>Permission modes, deny rules, hooks (see CLI docs under <code>~/.grok/docs</code>).</li>
+                <li>Sessions, auth, updates, <code>/privacy</code> live here.</li>
+              </ul>
+              <p class="layer-lim">
+                Limit: this is still an online coding agent. Tooling is powerful by design.
+              </p>
+            </article>
+
+            <article class="layer">
+              <h4>3 · You (project &amp; habits)</h4>
+              <ul>
+                <li>Pick a <strong>small git project</strong>, not your whole home folder.</li>
+                <li>Keep secrets out of the tree when you can.</li>
+                <li>Start with <strong>Learn / plan / explore</strong> before “ship everything.”</li>
+                <li>Turn auto-approve on only when you accept the risk.</li>
+              </ul>
+            </article>
+          </div>
+
+          <h3 class="mt">Right now on this machine</h3>
+          <div class="now">
+            <div class:ok={!alwaysApprove} class:warn={alwaysApprove}>
+              Auto-approve tools: <strong>{alwaysApprove ? "ON" : "OFF"}</strong>
+              {alwaysApprove ? " — agent can run tools without asking (as configured)" : " — safer for learning"}
+            </div>
+            <div class:ok={isGit} class:warn={!isGit}>
+              Project git: <strong>{isGit ? "yes" : "no"}</strong>
+              {isGit ? " — you can diff / revert" : " — hard to undo mistakes"}
+            </div>
+            <div class:ok={connected} class:muted={!connected}>
+              Agent session: <strong>{connected ? "connected" : "not connected"}</strong>
+              {connected ? " — model traffic can flow when you chat" : " — nothing sent until you Connect"}
+            </div>
+          </div>
+        </section>
+      {:else}
+        <section>
+          <h3>What you can do in 60 seconds</h3>
+          <ol class="steps">
+            <li>
+              <strong>Keep auto-approve off</strong> until you trust a project (More → Session
+              controls).
+            </li>
+            <li>
+              <strong>Use a git folder</strong> — <code>git init</code> if needed.
+            </li>
+            <li>
+              <strong>Account privacy:</strong> open Terminal → <code>grok</code> → type
+              <code>/privacy</code> and set retention the way xAI offers for your plan.
+            </li>
+            <li>
+              <strong>Less analytics noise:</strong> in <code>~/.grok/config.toml</code> you can set
+              <code>telemetry = false</code> under <code>[features]</code> (see official docs).
+              Click Refresh below after changing.
+            </li>
+            <li>
+              <strong>Review MCP/plugins</strong> you enabled — they can call outside services.
+            </li>
+          </ol>
+
+          <div class="config-box">
+            <h4>Config we can see on disk</h4>
+            {#if loading}
+              <p class="muted">Loading…</p>
+            {:else if snap}
+              <ul class="plain">
+                <li>Telemetry: {flagLabel(snap.telemetryEnabled)}</li>
+                <li>Trace upload: {flagLabel(snap.traceUpload)}</li>
+                <li>CLI permission_mode: {snap.configPermissionMode ?? "not set"}</li>
+                <li>Auth cache: {snap.authCachePresent ? "yes" : "no"}</li>
+                <li>Path: <code>{snap.configPath ?? "—"}</code></li>
+              </ul>
+            {:else}
+              <p class="muted">No snapshot yet.</p>
+            {/if}
+          </div>
+
+          <div class="actions-block">
+            {#if onSafeExplore}
+              <button type="button" class="btn accent" onclick={onSafeExplore}>
+                Safe explore mode
+              </button>
+              <p class="muted small">
+                Forces auto-approve off and points you at a read-heavy Learn loop.
+              </p>
+            {/if}
+            <div class="row">
+              <button type="button" class="btn" onclick={openCliDocs}>Official CLI docs</button>
+              <button type="button" class="btn" onclick={load} disabled={loading}>
+                Refresh status
+              </button>
+            </div>
+          </div>
+        </section>
+      {/if}
 
       <footer>
         {#if onAck}
@@ -202,7 +364,7 @@
               onClose();
             }}
           >
-            I understand — continue
+            I understand the data status — continue
           </button>
         {:else}
           <button type="button" class="btn primary" onclick={onClose}>Close</button>
@@ -210,8 +372,8 @@
       </footer>
 
       <p class="legal">
-        Not legal advice. Not affiliated with xAI. Full write-up:
-        <code>docs/SAFETY-AND-DATA.md</code> in the repo.
+        Not legal advice · Not affiliated with xAI · Full doc:
+        <code>docs/SAFETY-AND-DATA.md</code>
       </p>
     </div>
   </div>
@@ -222,108 +384,285 @@
     position: fixed;
     inset: 0;
     z-index: 85;
-    background: rgba(0, 0, 0, 0.6);
+    background: rgba(0, 0, 0, 0.62);
     display: grid;
     place-items: center;
-    padding: 1rem;
+    padding: 0.75rem;
   }
 
   .card {
-    width: min(520px, 100%);
-    max-height: min(92vh, 820px);
+    width: min(560px, 100%);
+    max-height: min(94vh, 860px);
     overflow: auto;
-    background: #151922;
+    background: #12151a;
     border: 1px solid #2a3344;
     border-radius: 14px;
-    padding: 1.15rem 1.25rem;
+    padding: 1.1rem 1.2rem 1rem;
   }
 
   header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
+    gap: 0.5rem;
   }
 
   .eyebrow {
     margin: 0;
     font-size: 0.72rem;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
     color: #fbbf24;
   }
 
   h2 {
     margin: 0.2rem 0 0;
-    font-size: 1.15rem;
+    font-size: 1.12rem;
   }
 
   h3 {
-    margin: 0 0 0.4rem;
+    margin: 0 0 0.5rem;
+    font-size: 0.95rem;
+    color: #e8eaed;
+  }
+
+  h3.mt {
+    margin-top: 1rem;
+  }
+
+  h4 {
+    margin: 0 0 0.35rem;
     font-size: 0.88rem;
     color: #a5b4fc;
   }
 
   .lead {
-    margin: 0.75rem 0;
+    margin: 0.65rem 0 0.75rem;
     font-size: 0.9rem;
-    line-height: 1.45;
-    color: #c5cad6;
-  }
-
-  section {
-    margin: 0.9rem 0;
-  }
-
-  ul {
-    margin: 0;
-    padding-left: 1.15rem;
-    font-size: 0.86rem;
     line-height: 1.5;
     color: #c5cad6;
   }
 
-  .check li {
-    margin: 0.25rem 0;
-  }
-
-  .check li.ok {
-    color: #86efac;
-  }
-
-  .check li.bad {
-    color: #fde68a;
-  }
-
-  dl {
-    margin: 0;
-    display: grid;
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
     gap: 0.35rem;
-    font-size: 0.82rem;
+    margin-bottom: 0.85rem;
   }
 
-  dt {
+  .tabs button {
+    border: 1px solid #2a3344;
+    background: #0d0f12;
     color: #8b93a7;
-  }
-
-  dd {
-    margin: 0.1rem 0 0.25rem;
-  }
-
-  .summary {
-    margin-top: 0.65rem;
-    font-size: 0.8rem;
-    color: #8b93a7;
-  }
-
-  .x {
-    border: none;
-    background: transparent;
-    color: #8b93a7;
-    font-size: 1.4rem;
+    border-radius: 999px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.78rem;
     cursor: pointer;
   }
 
+  .tabs button.on {
+    background: #1a2744;
+    border-color: #3b82f6;
+    color: #e8eaed;
+  }
+
+  .answer-card {
+    border-radius: 10px;
+    padding: 0.75rem 0.85rem;
+    border: 1px solid #854d0e;
+    background: #2a2110;
+  }
+
+  .answer-card p {
+    margin: 0.45rem 0 0;
+    font-size: 0.86rem;
+    line-height: 1.5;
+    color: #fde68a;
+  }
+
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #fbbf24;
+  }
+
+  .board {
+    display: grid;
+    gap: 0.45rem;
+  }
+
+  .row-card {
+    border: 1px solid #2a3344;
+    border-radius: 10px;
+    padding: 0.55rem 0.7rem;
+    background: #0d0f12;
+  }
+
+  .row-card header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .row-card strong {
+    font-size: 0.86rem;
+  }
+
+  .row-card em {
+    margin-left: auto;
+    font-style: normal;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #8b93a7;
+  }
+
+  .row-card p {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: #a8b0c0;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #6b7280;
+    flex-shrink: 0;
+  }
+
+  .row-card.red {
+    border-color: #7f1d1d;
+    background: #1c1010;
+  }
+  .row-card.red .dot,
+  .row-card.red em {
+    background: #f87171;
+    color: #fca5a5;
+  }
+  .row-card.red .dot {
+    background: #f87171;
+  }
+
+  .row-card.yellow {
+    border-color: #854d0e;
+    background: #1a160c;
+  }
+  .row-card.yellow .dot {
+    background: #fbbf24;
+  }
+  .row-card.yellow em {
+    color: #fde68a;
+  }
+
+  .row-card.green {
+    border-color: #166534;
+    background: #0c1610;
+  }
+  .row-card.green .dot {
+    background: #34d399;
+  }
+  .row-card.green em {
+    color: #86efac;
+  }
+
+  .pill {
+    font-size: 0.7rem;
+    margin-left: 0.35rem;
+    color: #86efac;
+  }
+
+  .note {
+    margin: 0.85rem 0 0;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: #8b93a7;
+    border-left: 3px solid #3b82f6;
+    padding-left: 0.65rem;
+  }
+
+  .layers {
+    display: grid;
+    gap: 0.55rem;
+  }
+
+  .layer {
+    border: 1px solid #2a3344;
+    border-radius: 10px;
+    padding: 0.65rem 0.75rem;
+    background: #0d0f12;
+  }
+
+  .layer ul {
+    margin: 0.25rem 0;
+    padding-left: 1.1rem;
+    font-size: 0.84rem;
+    line-height: 1.45;
+    color: #c5cad6;
+  }
+
+  .layer-lim {
+    margin: 0.4rem 0 0;
+    font-size: 0.78rem;
+    color: #8b93a7;
+  }
+
+  .now {
+    display: grid;
+    gap: 0.35rem;
+    font-size: 0.84rem;
+  }
+
+  .now div {
+    padding: 0.45rem 0.6rem;
+    border-radius: 8px;
+    border: 1px solid #2a3344;
+    background: #0d0f12;
+    color: #c5cad6;
+  }
+
+  .now .ok {
+    border-color: #166534;
+    color: #bbf7d0;
+  }
+
+  .now .warn {
+    border-color: #854d0e;
+    color: #fde68a;
+  }
+
+  .steps {
+    margin: 0;
+    padding-left: 1.2rem;
+    font-size: 0.86rem;
+    line-height: 1.55;
+    color: #c5cad6;
+  }
+
+  .config-box {
+    margin-top: 0.85rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    border: 1px solid #2a3344;
+    background: #0d0f12;
+  }
+
+  .plain {
+    margin: 0.35rem 0 0;
+    padding-left: 1.1rem;
+    font-size: 0.82rem;
+    color: #a8b0c0;
+  }
+
   .actions-block {
+    margin-top: 0.85rem;
     border-top: 1px solid #232a38;
     padding-top: 0.75rem;
   }
@@ -338,7 +677,15 @@
   footer {
     display: flex;
     justify-content: flex-end;
-    margin-top: 0.75rem;
+    margin-top: 0.9rem;
+  }
+
+  .x {
+    border: none;
+    background: transparent;
+    color: #8b93a7;
+    font-size: 1.4rem;
+    cursor: pointer;
   }
 
   .btn {
@@ -374,16 +721,12 @@
     margin: 0.35rem 0 0;
   }
 
-  .ok {
-    color: #86efac;
-  }
-
   .bad {
     color: #fca5a5;
   }
 
   .legal {
-    margin: 0.75rem 0 0;
+    margin: 0.7rem 0 0;
     font-size: 0.72rem;
     color: #6b7280;
     line-height: 1.4;

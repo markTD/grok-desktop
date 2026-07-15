@@ -111,19 +111,24 @@
         {/if}
       </p>
     {:else if step === 3}
-      <h2 id="setup-title">Data & safety (read this)</h2>
+      <h2 id="setup-title">Will it send my code?</h2>
       <p class="body">
-        <strong>This app is local.</strong> There is no separate Grok Desktop cloud. The
-        <strong>Grok Build CLI</strong> talks to <strong>xAI</strong> so the model can work —
-        prompts and files the agent reads may leave your machine.
+        <strong>Short answer:</strong> This app has <strong>no cloud of its own</strong>. The AI
+        still runs through <strong>Grok Build → xAI</strong>. It does <strong>not</strong> zip your
+        whole repo by default — but when the agent opens files or runs tools, <strong>those pieces
+        can leave your computer</strong> so the model can work.
       </p>
       <ul class="bullets">
-        <li>Sessions live under <code>~/.grok/sessions/</code></li>
-        <li>Keep <strong>auto-approve off</strong> while learning</li>
-        <li>Prefer a <strong>git repo</strong> so you can undo</li>
-        <li>Account retention: in the TUI run <code>/privacy</code></li>
+        <li><strong>Chat messages</strong> → xAI (required for answers)</li>
+        <li><strong>Files the agent reads/edits</strong> → can go to xAI</li>
+        <li><strong>Full project zip upload</strong> → not what this UI does</li>
+        <li><strong>History on disk</strong> → local <code>~/.grok/sessions/</code></li>
+        <li><strong>Account retention / training</strong> → set in Grok TUI with <code>/privacy</code></li>
       </ul>
-      <p class="muted">Full details later: More → Data & safety, or docs/SAFETY-AND-DATA.md</p>
+      <p class="muted">
+        After setup, open <strong>Safety</strong> anytime for the full status board + harness
+        explanation.
+      </p>
     {:else if step === 4}
       <h2 id="setup-title">Choose a project folder</h2>
       <p class="body">

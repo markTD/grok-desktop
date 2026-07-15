@@ -97,21 +97,20 @@ See [docs/PRODUCT.md](docs/PRODUCT.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
-## Safety & data transparency
+## Safety & data transparency (trust first)
 
-**Read [docs/SAFETY-AND-DATA.md](docs/SAFETY-AND-DATA.md)** before serious use.
+**Read [docs/SAFETY-AND-DATA.md](docs/SAFETY-AND-DATA.md)** — written for laypeople.
 
-Short version:
+| Question | Plain answer |
+|----------|----------------|
+| Own cloud for this app? | **No** |
+| Uploads entire codebase as one package? | **No default** |
+| Can project files leave the Mac? | **Yes** — files the agent reads/edits for a turn can go to **xAI** via Grok Build |
+| Chat messages? | **Yes** → xAI (how the model works) |
+| Where is history stored? | Local `~/.grok/sessions/` |
+| Account training/retention? | Your plan + official TUI **`/privacy`** (not controlled by this UI) |
 
-| Topic | Reality |
-|-------|---------|
-| Grok Desktop cloud? | **No** — local UI only |
-| Model / tool traffic | Goes through **official Grok Build CLI → xAI** (and MCP you enable) |
-| Sessions on disk | `~/.grok/sessions/` |
-| Your exports | Only if you click Export → `.grok-desktop/notes/` |
-| Safer exploring | Auto-approve **off**, use a **git** folder, prefer Learn / plan first |
-
-In the app: **Safety** button (or **More → Data & safety**). Account retention: Grok TUI `/privacy`.
+**In the app:** header **Safety** → tabs for **Data status**, **Harness & guardrails**, **Your controls**.
 
 ---
 
