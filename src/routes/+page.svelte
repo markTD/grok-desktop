@@ -3,6 +3,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { fetchGrokStatus } from "$lib/grok";
   import {
+    acpCancel,
     acpConnect,
     acpDisconnect,
     acpPrompt,
@@ -21,6 +22,13 @@
     setLastCwd,
     setOnboardingDone,
   } from "$lib/storage";
+  import type { OrchestrationLoop } from "$lib/loops";
+  import {
+    accumulateUsage,
+    emptyUsage,
+    formatUsage,
+    type UsageSnapshot,
+  } from "$lib/usage";
   import type {
     ChatItem,
     GrokStatus,
@@ -34,6 +42,7 @@
   import Onboarding from "$lib/components/Onboarding.svelte";
   import GuidedKickoff from "$lib/components/GuidedKickoff.svelte";
   import PermissionModal from "$lib/components/PermissionModal.svelte";
+  import OrchestrationPanel from "$lib/components/OrchestrationPanel.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
 
   let status = $state<GrokStatus | null>(null);
@@ -41,6 +50,8 @@
 
   let cwd = $state(getLastCwd(""));
   let alwaysApprove = $state(false);
+  let modelChoice = $state("");
+  let effortChoice = $state("high");
   let connected = $state(false);
   let sessionId = $state<string | null>(null);
   let modelId = $state<string | null>(null);
@@ -54,10 +65,17 @@
   let logs = $state<string[]>([]);
   let showLogs = $state(false);
   let recent = $state<RecentSession[]>([]);
+  let usage = $state<UsageSnapshot>(emptyUsage());
 
   let showOnboarding = $state(false);
   let showKickoff = $state(false);
+  let showOrch = $state(false);
   let permissionReq = $state<PermissionEvent | null>(null);
+
+  let loopRunning = $state(false);
+  let loopStop = $state(false);
+  let loopStepIndex = $state(-1);
+  let activeLoopId = $state<string | null>(null);
 
   let scrollEl: HTMLElement | undefined = $state();
   let unlisteners: UnlistenFn[] = [];
@@ -132,6 +150,14 @@
     if (kind === "tool_call" || kind === "tool_call_update") {
       streamAssistantId = null;
       streamThoughtId = null;
+      const toolCallId =
+        typeof update.toolCallId === "string"
+          ? update.toolCallId
+          : typeof update.tool_call_id === "string"
+            ? update.tool_call_id
+            : typeof (update as { id?: unknown }).id === "string"
+              ? String((update as { id: string }).id)
+              : undefined;
       const title =
         (typeof update.title === "string" && update.title) ||
         (typeof update.toolName === "string" && update.toolName) ||
@@ -139,9 +165,37 @@
       const toolStatus =
         (typeof update.status === "string" && update.status) || kind;
       const detail = typeof update.kind === "string" ? update.kind : undefined;
+
+      if (toolCallId) {
+        const existing = items.findIndex(
+          (it) => it.role === "tool" && it.toolCallId === toolCallId,
+        );
+        if (existing >= 0) {
+          items = items.map((it, i) =>
+            i === existing && it.role === "tool"
+              ? {
+                  ...it,
+                  title: title !== "tool" ? title : it.title,
+                  status: toolStatus,
+                  detail: detail ?? it.detail,
+                }
+              : it,
+          );
+          scrollToBottom();
+          return;
+        }
+      }
+
       items = [
         ...items,
-        { id: nid("tool"), role: "tool", title, status: toolStatus, detail },
+        {
+          id: nid("tool"),
+          role: "tool",
+          title,
+          status: toolStatus,
+          detail,
+          toolCallId,
+        },
       ];
       scrollToBottom();
       return;
@@ -173,6 +227,7 @@
     rules?: string | null;
     alwaysApprove?: boolean;
     clearChat?: boolean;
+    resetUsage?: boolean;
   } = {}) {
     error = null;
     connecting = true;
@@ -185,6 +240,8 @@
         alwaysApprove: aa,
         resumeSessionId: opts.resumeSessionId ?? null,
         rules: opts.rules ?? null,
+        model: modelChoice.trim() || null,
+        effort: effortChoice.trim() || null,
       });
       connected = true;
       sessionId = res.sessionId;
@@ -204,8 +261,11 @@
       if (opts.clearChat !== false) {
         items = [];
       }
+      if (opts.resetUsage !== false && !opts.resumeSessionId) {
+        usage = emptyUsage();
+      }
       pushSystem(
-        `${res.resumed ? "Resumed" : "Connected"} · Grok Build${res.modelId ? ` · ${res.modelId}` : ""} · ${res.alwaysApprove ? "auto-approve" : "ask on tools"}`,
+        `${res.resumed ? "Resumed" : "Connected"} · Grok Build${res.modelId ? ` · ${res.modelId}` : ""} · ${res.alwaysApprove ? "auto-approve" : "ask on tools"}${effortChoice ? ` · effort ${effortChoice}` : ""}`,
       );
       return res;
     } catch (e) {
@@ -244,7 +304,12 @@
 
   async function disconnect() {
     error = null;
+    loopStop = true;
+    loopRunning = false;
+    activeLoopId = null;
+    loopStepIndex = -1;
     try {
+      if (busy) await acpCancel().catch(() => {});
       await acpDisconnect();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -259,22 +324,26 @@
     }
   }
 
-  async function sendPrompt() {
-    const text = prompt.trim();
-    if (!text || !connected || busy) return;
+  /** Core prompt send. Returns false if cancelled/failed. */
+  async function runPromptTurn(text: string, opts: { showInComposer?: boolean } = {}) {
+    if (!text.trim() || !connected) return false;
+    if (busy) return false;
 
     error = null;
     busy = true;
     streamAssistantId = null;
     streamThoughtId = null;
     items = [...items, { id: nid("user"), role: "user", text }];
-    prompt = "";
+    if (opts.showInComposer !== false) {
+      /* no-op: caller clears composer when needed */
+    }
     await scrollToBottom();
 
     try {
       const result = await acpPrompt(text);
       streamAssistantId = null;
       streamThoughtId = null;
+      usage = accumulateUsage(usage, result.meta);
       if (result.stopReason) {
         pushSystem(`Turn complete · ${result.stopReason}`);
       }
@@ -287,14 +356,98 @@
         });
         recent = loadRecentSessions();
       }
+      return true;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-      pushSystem(`Error: ${error}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.toLowerCase().includes("cancel")) {
+        pushSystem("Turn cancelled");
+      } else {
+        error = msg;
+        pushSystem(`Error: ${msg}`);
+      }
+      return false;
     } finally {
       busy = false;
       streamAssistantId = null;
       streamThoughtId = null;
     }
+  }
+
+  async function sendPrompt() {
+    const text = prompt.trim();
+    if (!text || !connected || busy || loopRunning) return;
+    prompt = "";
+    await runPromptTurn(text);
+  }
+
+  async function cancelTurn() {
+    try {
+      await acpCancel();
+      if (loopRunning) loopStop = true;
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function startLoop(loop: OrchestrationLoop, goal: string) {
+    loopStop = false;
+    showOrch = true;
+    activeLoopId = loop.id;
+    loopRunning = true;
+    loopStepIndex = 0;
+
+    if (!connected) {
+      alwaysApprove = loop.preferAutoApprove || alwaysApprove;
+      const res = await doConnect({
+        rules: loop.rules,
+        alwaysApprove: loop.preferAutoApprove ? true : alwaysApprove,
+      });
+      if (!res) {
+        loopRunning = false;
+        activeLoopId = null;
+        loopStepIndex = -1;
+        return;
+      }
+    }
+
+    items = [
+      ...items,
+      {
+        id: nid("loop"),
+        role: "loop",
+        text: `Loop: ${loop.name} — ${goal}`,
+      },
+    ];
+
+    const completed: string[] = [];
+    for (let i = 0; i < loop.steps.length; i++) {
+      if (loopStop) {
+        pushSystem("Loop stopped");
+        break;
+      }
+      loopStepIndex = i;
+      const step = loop.steps[i];
+      pushSystem(`Loop step ${i + 1}/${loop.steps.length}: ${step.label}`);
+      const stepPrompt = step.buildPrompt(goal, completed);
+      const ok = await runPromptTurn(stepPrompt);
+      if (!ok || loopStop) {
+        pushSystem("Loop stopped");
+        break;
+      }
+      completed.push(step.label);
+    }
+
+    if (!loopStop && completed.length === loop.steps.length) {
+      pushSystem(`Loop complete: ${loop.name}`);
+    }
+    loopRunning = false;
+    loopStepIndex = -1;
+    activeLoopId = null;
+  }
+
+  function stopLoop() {
+    loopStop = true;
+    cancelTurn();
   }
 
   async function replyPermission(optionId: string | null, cancelled = false) {
@@ -368,6 +521,20 @@
 
 <PermissionModal request={permissionReq} onReply={replyPermission} />
 
+<OrchestrationPanel
+  open={showOrch}
+  connected={connected}
+  busy={busy}
+  loopRunning={loopRunning}
+  currentStepIndex={loopStepIndex}
+  activeLoopId={activeLoopId}
+  onClose={() => {
+    if (!loopRunning) showOrch = false;
+  }}
+  onStart={startLoop}
+  onStop={stopLoop}
+/>
+
 <div class="app">
   <header class="header">
     <div class="brand">
@@ -378,8 +545,9 @@
           {#if connected}
             {connectionMessage || "Connected"}
             {#if modelId}<span class="pill">{modelId}</span>{/if}
+            {#if usage.turns > 0}<span class="pill muted-pill">{formatUsage(usage)}</span>{/if}
           {:else if status?.ready}
-            CLI ready — pick a folder or start Guided kickoff
+            CLI ready — kickoff, loops, or connect
           {:else}
             {status?.message ?? "Checking Grok CLI…"}
           {/if}
@@ -392,9 +560,9 @@
           Grok Desktop is a thin shell over the official <strong>Grok Build</strong> CLI via ACP.
         </p>
         <ul>
-          <li><strong>Guided kickoff</strong> interviews you and writes a strong first prompt.</li>
-          <li><strong>Connect</strong> starts a free-form chat on a project folder.</li>
-          <li>Tools, models, and login live in <code>grok</code> — not reimplemented here.</li>
+          <li><strong>Guided kickoff</strong> — interview → strong first prompt.</li>
+          <li><strong>Loops</strong> — multi-step explore/plan/implement sequences.</li>
+          <li><strong>Connect</strong> — free-form chat on a project folder.</li>
         </ul>
       </HelpTip>
       <button type="button" class="btn ghost" onclick={() => (showOnboarding = true)}>Tour</button>
@@ -427,9 +595,27 @@
       </button>
     </div>
     <div class="toolbar-actions">
+      <label class="field">
+        <span>Effort</span>
+        <select bind:value={effortChoice} disabled={connected || connecting}>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+          <option value="xhigh">xhigh</option>
+        </select>
+      </label>
+      <label class="field model-field">
+        <span>Model</span>
+        <input
+          bind:value={modelChoice}
+          disabled={connected || connecting}
+          placeholder="default"
+          spellcheck="false"
+        />
+      </label>
       <label class="check" class:disabled={connected}>
         <input type="checkbox" bind:checked={alwaysApprove} disabled={connected || connecting} />
-        Auto-approve tools
+        Auto-approve
         <HelpTip title="Auto-approve" label="?">
           <p>
             When on, tools run without asking (faster vibe coding). When off, you’ll get a
@@ -437,6 +623,14 @@
           </p>
         </HelpTip>
       </label>
+      <button
+        type="button"
+        class="btn accent"
+        onclick={() => (showOrch = true)}
+        disabled={connecting || !status?.ready || (busy && !loopRunning)}
+      >
+        Loops
+      </button>
       {#if !connected}
         <button
           type="button"
@@ -444,7 +638,7 @@
           onclick={() => (showKickoff = true)}
           disabled={connecting || !status?.ready}
         >
-          Guided kickoff
+          Kickoff
         </button>
         <button
           type="button"
@@ -455,7 +649,7 @@
           {connecting ? "Connecting…" : "Connect"}
         </button>
       {:else}
-        <button type="button" class="btn danger" onclick={disconnect} disabled={busy}>
+        <button type="button" class="btn danger" onclick={disconnect}>
           Disconnect
         </button>
       {/if}
@@ -500,20 +694,30 @@
       <div class="empty">
         <h2>Build with Grok — without fighting the terminal</h2>
         <p>
-          New here? Use <strong>Guided kickoff</strong>. We’ll ask a few questions, pick sensible
-          safety settings, and start Grok with a clear first prompt.
+          New here? Use <strong>Kickoff</strong> (interview) or <strong>Loops</strong> (explore →
+          plan → implement → verify).
         </p>
         <p class="muted">
-          Or <strong>Browse…</strong> to a project → <strong>Connect</strong> → chat freely.
+          Or <strong>Browse…</strong> → <strong>Connect</strong> → free-form chat.
         </p>
-        <button
-          type="button"
-          class="btn accent"
-          onclick={() => (showKickoff = true)}
-          disabled={!status?.ready || connected}
-        >
-          Start guided kickoff
-        </button>
+        <div class="empty-actions">
+          <button
+            type="button"
+            class="btn accent"
+            onclick={() => (showKickoff = true)}
+            disabled={!status?.ready}
+          >
+            Guided kickoff
+          </button>
+          <button
+            type="button"
+            class="btn primary"
+            onclick={() => (showOrch = true)}
+            disabled={!status?.ready}
+          >
+            Run a loop
+          </button>
+        </div>
       </div>
     {:else}
       {#each items as item (item.id)}
@@ -538,6 +742,10 @@
             <div class="tool-title">{item.title}</div>
             {#if item.detail}<div class="muted small">{item.detail}</div>{/if}
           </article>
+        {:else if item.role === "loop"}
+          <article class="bubble loop">
+            <pre>{item.text}</pre>
+          </article>
         {:else}
           <article class="bubble system">
             <pre>{item.text}</pre>
@@ -545,7 +753,13 @@
         {/if}
       {/each}
       {#if busy}
-        <div class="typing muted">Agent working…</div>
+        <div class="typing muted">
+          {#if loopRunning}
+            Loop step {(loopStepIndex >= 0 ? loopStepIndex : 0) + 1}… agent working
+          {:else}
+            Agent working…
+          {/if}
+        </div>
       {/if}
     {/if}
   </main>
@@ -555,19 +769,25 @@
       bind:value={prompt}
       onkeydown={onKeydown}
       placeholder={connected
-        ? "Message Grok Build… (Enter send · Shift+Enter newline)"
-        : "Connect or use Guided kickoff first"}
-      disabled={!connected || busy}
+        ? loopRunning
+          ? "Loop running — wait or Cancel…"
+          : "Message Grok Build… (Enter send · Shift+Enter newline)"
+        : "Connect, Kickoff, or Loops first"}
+      disabled={!connected || busy || loopRunning}
       rows="3"
     ></textarea>
-    <button
-      type="button"
-      class="btn primary send"
-      onclick={sendPrompt}
-      disabled={!connected || busy || !prompt.trim()}
-    >
-      {busy ? "…" : "Send"}
-    </button>
+    {#if busy}
+      <button type="button" class="btn danger send" onclick={cancelTurn}>Cancel</button>
+    {:else}
+      <button
+        type="button"
+        class="btn primary send"
+        onclick={sendPrompt}
+        disabled={!connected || !prompt.trim() || loopRunning}
+      >
+        Send
+      </button>
+    {/if}
   </footer>
 </div>
 
@@ -642,6 +862,50 @@
     padding: 0.05rem 0.45rem;
     font-size: 0.72rem;
     color: #a5b4fc;
+  }
+
+  .muted-pill {
+    color: #94a3b8;
+    border-color: #2a3344;
+  }
+
+  .field {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    color: #8b93a7;
+  }
+
+  .field select,
+  .field input {
+    background: #0d0f12;
+    border: 1px solid #2a3344;
+    border-radius: 6px;
+    color: #e8eaed;
+    padding: 0.3rem 0.4rem;
+    font-size: 0.78rem;
+  }
+
+  .model-field input {
+    width: 7.5rem;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+
+  .empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-top: 0.75rem;
+  }
+
+  .loop {
+    align-self: center;
+    background: #13221f;
+    border-color: #1e4d3f;
+    color: #6ee7b7;
+    font-size: 0.85rem;
   }
 
   .header-actions {

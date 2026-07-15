@@ -45,6 +45,8 @@ struct LiveSession {
     next_id: Arc<AtomicU64>,
     pending: Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>,
     running: Arc<AtomicBool>,
+    /// JSON-RPC id of the in-flight `session/prompt`, if any.
+    active_prompt_id: Arc<Mutex<Option<u64>>>,
     reader: Option<thread::JoinHandle<()>>,
     always_approve: bool,
 }
@@ -60,6 +62,10 @@ pub struct ConnectOptions {
     pub resume_session_id: Option<String>,
     /// Extra rules appended to the system prompt (`session/new` `_meta.rules`).
     pub rules: Option<String>,
+    /// Model id for `grok agent -m`.
+    pub model: Option<String>,
+    /// Reasoning effort for `grok agent --effort`.
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -152,6 +158,24 @@ pub fn connect(app: AppHandle, state: &AcpState, opts: ConnectOptions) -> Result
     let binary_path = bin.display().to_string();
 
     let mut args = vec!["agent".to_string()];
+    if let Some(model) = opts
+        .model
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        args.push("-m".into());
+        args.push(model.to_string());
+    }
+    if let Some(effort) = opts
+        .effort
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        args.push("--effort".into());
+        args.push(effort.to_string());
+    }
     if opts.always_approve {
         args.push("--always-approve".into());
     }
@@ -197,6 +221,7 @@ pub fn connect(app: AppHandle, state: &AcpState, opts: ConnectOptions) -> Result
     let pending: Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>> =
         Arc::new(Mutex::new(HashMap::new()));
     let running = Arc::new(AtomicBool::new(true));
+    let active_prompt_id = Arc::new(Mutex::new(None));
     let stdin_for_reader = Arc::clone(&stdin);
 
     let pending_r = Arc::clone(&pending);
@@ -245,6 +270,7 @@ pub fn connect(app: AppHandle, state: &AcpState, opts: ConnectOptions) -> Result
         next_id: Arc::clone(&next_id),
         pending: Arc::clone(&pending),
         running: Arc::clone(&running),
+        active_prompt_id: None,
     };
 
     let init = bootstrap.request(
@@ -324,6 +350,7 @@ pub fn connect(app: AppHandle, state: &AcpState, opts: ConnectOptions) -> Result
         next_id,
         pending,
         running,
+        active_prompt_id,
         reader: Some(reader),
         always_approve: opts.always_approve,
     };
@@ -369,7 +396,7 @@ pub fn prompt(app: AppHandle, state: &AcpState, text: String) -> Result<PromptRe
         return Err("Prompt is empty".into());
     }
 
-    let (session_id, stdin, next_id, pending, running) = {
+    let (session_id, stdin, next_id, pending, running, active_prompt_id) = {
         let guard = state.inner.lock().map_err(|e| e.to_string())?;
         let live = guard
             .as_ref()
@@ -383,6 +410,7 @@ pub fn prompt(app: AppHandle, state: &AcpState, text: String) -> Result<PromptRe
             Arc::clone(&live.next_id),
             Arc::clone(&live.pending),
             Arc::clone(&live.running),
+            Arc::clone(&live.active_prompt_id),
         )
     };
 
@@ -393,6 +421,7 @@ pub fn prompt(app: AppHandle, state: &AcpState, text: String) -> Result<PromptRe
         next_id,
         pending,
         running,
+        active_prompt_id: Some(active_prompt_id),
     };
 
     let result = bootstrap.request(
@@ -402,7 +431,19 @@ pub fn prompt(app: AppHandle, state: &AcpState, text: String) -> Result<PromptRe
             "prompt": [{ "type": "text", "text": text }]
         }),
         Duration::from_secs(600),
-    )?;
+    );
+
+    // Always clear active prompt id when the wait ends.
+    // (request() also clears on success path via Drop-ish logic below)
+    if let Ok(guard) = state.inner.lock() {
+        if let Some(live) = guard.as_ref() {
+            if let Ok(mut ap) = live.active_prompt_id.lock() {
+                *ap = None;
+            }
+        }
+    }
+
+    let result = result?;
 
     let stop_reason = result
         .get("stopReason")
@@ -413,6 +454,43 @@ pub fn prompt(app: AppHandle, state: &AcpState, text: String) -> Result<PromptRe
         stop_reason,
         meta: result.get("_meta").cloned(),
     })
+}
+
+/// Cancel the in-flight prompt turn (`session/cancel` notification).
+pub fn cancel_turn(app: AppHandle, state: &AcpState) -> Result<(), String> {
+    let guard = state.inner.lock().map_err(|e| e.to_string())?;
+    let live = guard
+        .as_ref()
+        .ok_or_else(|| "Not connected".to_string())?;
+
+    let session_id = live.session_id.clone();
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "method": "session/cancel",
+        "params": { "sessionId": session_id }
+    });
+
+    {
+        let mut stdin = live.stdin.lock().map_err(|e| e.to_string())?;
+        writeln!(stdin, "{msg}").map_err(|e| format!("Write cancel failed: {e}"))?;
+        stdin
+            .flush()
+            .map_err(|e| format!("Flush cancel failed: {e}"))?;
+    }
+
+    // Unblock the waiting prompt request if still pending.
+    if let Ok(mut ap) = live.active_prompt_id.lock() {
+        if let Some(id) = ap.take() {
+            if let Ok(mut map) = live.pending.lock() {
+                if let Some(tx) = map.remove(&id) {
+                    let _ = tx.send(Err("Turn cancelled".into()));
+                }
+            }
+        }
+    }
+
+    emit_log(&app, format!("session/cancel ({session_id})"));
+    Ok(())
 }
 
 /// Reply to a `session/request_permission` from the agent.
@@ -490,6 +568,7 @@ struct Bootstrap {
     next_id: Arc<AtomicU64>,
     pending: Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>,
     running: Arc<AtomicBool>,
+    active_prompt_id: Option<Arc<Mutex<Option<u64>>>>,
 }
 
 impl Bootstrap {
@@ -509,6 +588,14 @@ impl Bootstrap {
             .map_err(|e| e.to_string())?
             .insert(id, tx);
 
+        if method == "session/prompt" {
+            if let Some(ap) = &self.active_prompt_id {
+                if let Ok(mut g) = ap.lock() {
+                    *g = Some(id);
+                }
+            }
+        }
+
         let msg = json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -524,7 +611,7 @@ impl Bootstrap {
                 .map_err(|e| format!("Flush to agent failed: {e}"))?;
         }
 
-        match rx.recv_timeout(timeout) {
+        let out = match rx.recv_timeout(timeout) {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(e)) => Err(e),
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -537,7 +624,19 @@ impl Bootstrap {
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 Err(format!("Agent channel closed while waiting for `{method}`"))
             }
+        };
+
+        if method == "session/prompt" {
+            if let Some(ap) = &self.active_prompt_id {
+                if let Ok(mut g) = ap.lock() {
+                    if g.as_ref() == Some(&id) {
+                        *g = None;
+                    }
+                }
+            }
         }
+
+        out
     }
 }
 

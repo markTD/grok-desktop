@@ -19,6 +19,10 @@ export async function acpPrompt(text: string): Promise<PromptResult> {
   return invoke<PromptResult>("acp_prompt", { text });
 }
 
+export async function acpCancel(): Promise<void> {
+  return invoke("acp_cancel");
+}
+
 export async function acpRespondPermission(reply: PermissionReply): Promise<void> {
   return invoke("acp_respond_permission", { reply });
 }

@@ -38,6 +38,11 @@ async fn acp_prompt(
 }
 
 #[tauri::command]
+fn acp_cancel(app: tauri::AppHandle, state: State<'_, Arc<AcpState>>) -> Result<(), String> {
+    acp::cancel_turn(app, &state)
+}
+
+#[tauri::command]
 fn acp_respond_permission(
     state: State<'_, Arc<AcpState>>,
     reply: PermissionReply,
@@ -65,6 +70,7 @@ pub fn run() {
             grok_status,
             acp_connect,
             acp_prompt,
+            acp_cancel,
             acp_respond_permission,
             acp_disconnect,
             acp_connection,

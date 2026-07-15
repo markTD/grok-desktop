@@ -21,11 +21,14 @@ xAI open-sourced the Grok Build harness. The agent is excellent; the default sur
 ## Features
 
 - **Guided kickoff** — interview → rules + starter prompt (prompt builder)  
-- **Connect / Disconnect** ACP sessions  
+- **Orchestration loops** — multi-step explore → plan → implement → verify (and more)  
+- **Connect / Disconnect** ACP sessions + **Cancel** in-flight turns  
 - **Resume** recent sessions (`session/load`)  
 - **Browse…** folder picker  
-- Streaming **message / thought / tool** updates  
+- Streaming **message / thought / tool** updates (tool cards merge by id)  
 - **Markdown** assistant output  
+- **Token usage** summary from turn metadata  
+- **Model / effort** selectors at connect  
 - **Auto-approve** toggle + permission modal when the agent asks  
 - First-run **tour** + contextual **?** help tips  
 

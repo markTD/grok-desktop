@@ -12,6 +12,8 @@ export type ConnectOptions = {
   alwaysApprove?: boolean;
   resumeSessionId?: string | null;
   rules?: string | null;
+  model?: string | null;
+  effort?: string | null;
 };
 
 export type ConnectResult = {
@@ -75,8 +77,16 @@ export type ChatItem =
   | { id: string; role: "user"; text: string }
   | { id: string; role: "assistant"; text: string }
   | { id: string; role: "thought"; text: string }
-  | { id: string; role: "tool"; title: string; status: string; detail?: string }
-  | { id: string; role: "system"; text: string };
+  | {
+      id: string;
+      role: "tool";
+      title: string;
+      status: string;
+      detail?: string;
+      toolCallId?: string;
+    }
+  | { id: string; role: "system"; text: string }
+  | { id: string; role: "loop"; text: string };
 
 export type RecentSession = {
   sessionId: string;

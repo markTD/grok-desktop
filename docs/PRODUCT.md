@@ -36,7 +36,11 @@ xAI open-sourcing the agent harness is extraordinary; this client is how we put 
 | Session resume (`session/load` + recent list) | Done |
 | First-run tour + help tips | Done |
 | Guided kickoff (interview → rules + starter prompt) | Done |
-| Multi-agent token orchestration loops | Future |
+| Multi-step orchestration loops (explore→plan→…) | Done |
+| Cancel in-flight turn | Done |
+| Token usage readout (session-ish) | Done |
+| Model / effort on connect | Done |
+| Parallel multi-agent arena UI | Future |
 
 ## Guided kickoff (prompt builder)
 
