@@ -3,17 +3,24 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AcpStatusEvent,
   AcpUpdateEvent,
+  ConnectOptions,
   ConnectResult,
   ConnectionInfo,
+  PermissionEvent,
+  PermissionReply,
   PromptResult,
 } from "./types";
 
-export async function acpConnect(cwd: string): Promise<ConnectResult> {
-  return invoke<ConnectResult>("acp_connect", { cwd });
+export async function acpConnect(options: ConnectOptions): Promise<ConnectResult> {
+  return invoke<ConnectResult>("acp_connect", { options });
 }
 
 export async function acpPrompt(text: string): Promise<PromptResult> {
   return invoke<PromptResult>("acp_prompt", { text });
+}
+
+export async function acpRespondPermission(reply: PermissionReply): Promise<void> {
+  return invoke("acp_respond_permission", { reply });
 }
 
 export async function acpDisconnect(): Promise<void> {
@@ -42,6 +49,12 @@ export function onAcpError(handler: (message: string) => void): Promise<Unlisten
 
 export function onAcpLog(handler: (message: string) => void): Promise<UnlistenFn> {
   return listen<string>("acp://log", (e) => handler(e.payload));
+}
+
+export function onAcpPermission(
+  handler: (event: PermissionEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<PermissionEvent>("acp://permission", (e) => handler(e.payload));
 }
 
 /** Pull text out of an ACP content block if present. */

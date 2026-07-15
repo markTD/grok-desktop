@@ -1,43 +1,43 @@
 # Grok Desktop
 
-A macOS-friendly **desktop shell for [Grok Build](https://x.ai/cli)** — Claude Desktop–style UX over the official agent, via the [Agent Client Protocol (ACP)](https://agentclientprotocol.com).
+A friendly **desktop shell for [Grok Build](https://x.ai/cli)** — Claude Desktop–style UX over the official coding agent, via the [Agent Client Protocol (ACP)](https://agentclientprotocol.com).
+
+Built for people who want to **vibe-code with Grok** without mastering a TUI or prompt engineering.
 
 ```
 Grok Desktop (UI)  ──ACP──►  grok agent stdio  ──►  tools / MCP / models / auth
 ```
 
-This app does **not** reimplement the coding agent. It is a thin client around the `grok` CLI you already install from xAI.
+## Why this exists
 
-## Status
+xAI open-sourced the Grok Build harness. The agent is excellent; the default surface is a terminal. **Grok Desktop** is a thin client so more people can:
 
-**Phase 1 — ACP chat spike**
+- Pick a project folder  
+- Start with a **Guided kickoff** (short interview → strong first prompt)  
+- See thinking, tools, and markdown replies  
+- Resume sessions  
+- Optionally auto-approve tools for fast loops  
 
-- [x] Tauri 2 + SvelteKit (TypeScript) scaffold  
-- [x] Locate `grok` + soft readiness check  
-- [x] Spawn `grok agent --always-approve stdio`  
-- [x] `initialize` → `authenticate` (cached token) → `session/new`  
-- [x] Streaming chat: message / thought / tool updates  
-- [ ] Interactive permission UI (currently auto-approve)  
-- [ ] Folder picker dialog  
+## Features
 
-See [docs/PRODUCT.md](docs/PRODUCT.md) for scope, non-goals, and MVP checklist.
-
-### Try the chat
-
-1. `npm run tauri dev`
-2. Confirm CLI status shows **Ready** and **Authenticated**
-3. Set **Project folder** to an absolute path
-4. **Connect** → type a message → **Send**
+- **Guided kickoff** — interview → rules + starter prompt (prompt builder)  
+- **Connect / Disconnect** ACP sessions  
+- **Resume** recent sessions (`session/load`)  
+- **Browse…** folder picker  
+- Streaming **message / thought / tool** updates  
+- **Markdown** assistant output  
+- **Auto-approve** toggle + permission modal when the agent asks  
+- First-run **tour** + contextual **?** help tips  
 
 ## Prerequisites
 
 1. **Node.js** 18+ and **Rust** (stable)  
-2. **Grok Build CLI** and a signed-in session:
+2. **Grok Build CLI** signed in:
 
    ```bash
    curl -fsSL https://x.ai/cli/install.sh | bash
    grok --version
-   grok models    # should succeed when authenticated
+   grok models
    ```
 
 3. Optional: `export GROK_BINARY=/path/to/grok`
@@ -50,16 +50,25 @@ npm install
 npm run tauri dev
 ```
 
-Frontend only (no native probe): `npm run dev`
+## How to use (60 seconds)
+
+1. Confirm header shows CLI **Ready** / authenticated  
+2. **Browse…** to a project (preferably a git repo)  
+3. Either:  
+   - **Guided kickoff** → answer 4 short questions → launch, or  
+   - **Connect** → type freely  
+4. Watch tools + replies stream in  
 
 ## Architecture
 
 | Layer | Responsibility |
 |-------|----------------|
-| **Svelte UI** | Status, chat, tool cards, permissions (upcoming) |
-| **Tauri / Rust** | Spawn `grok`, ACP JSON-RPC, process lifecycle |
-| **Grok Build CLI** | Agent loop, tools, sandbox, MCP, OAuth |
+| Svelte UI | Onboarding, kickoff, chat, permissions |
+| Tauri / Rust | Spawn `grok`, ACP JSON-RPC, process lifecycle |
+| Grok Build CLI | Agent loop, tools, sandbox, MCP, OAuth |
+
+See [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## License
 
-MIT for this repository. Grok Build itself is separate software (see xAI terms and the [grok-build](https://github.com/xai-org/grok-build) Apache-2.0 tree).
+MIT for this repository. Grok Build itself is separate software (see xAI terms and [grok-build](https://github.com/xai-org/grok-build)).

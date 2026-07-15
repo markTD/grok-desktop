@@ -1,23 +1,46 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
+  import { open } from "@tauri-apps/plugin-dialog";
   import { fetchGrokStatus } from "$lib/grok";
   import {
     acpConnect,
     acpDisconnect,
     acpPrompt,
+    acpRespondPermission,
     contentText,
     onAcpError,
     onAcpLog,
+    onAcpPermission,
     onAcpStatus,
     onAcpUpdate,
   } from "$lib/acp";
-  import type { ChatItem, GrokStatus } from "$lib/types";
+  import { loadRecentSessions, saveRecentSession } from "$lib/sessions";
+  import {
+    getLastCwd,
+    isOnboardingDone,
+    setLastCwd,
+    setOnboardingDone,
+  } from "$lib/storage";
+  import type {
+    ChatItem,
+    GrokStatus,
+    KickoffAnswers,
+    KickoffPlan,
+    PermissionEvent,
+    RecentSession,
+  } from "$lib/types";
   import type { UnlistenFn } from "@tauri-apps/api/event";
+  import HelpTip from "$lib/components/HelpTip.svelte";
+  import Onboarding from "$lib/components/Onboarding.svelte";
+  import GuidedKickoff from "$lib/components/GuidedKickoff.svelte";
+  import PermissionModal from "$lib/components/PermissionModal.svelte";
+  import Markdown from "$lib/components/Markdown.svelte";
 
   let status = $state<GrokStatus | null>(null);
   let statusLoading = $state(true);
 
-  let cwd = $state("");
+  let cwd = $state(getLastCwd(""));
+  let alwaysApprove = $state(false);
   let connected = $state(false);
   let sessionId = $state<string | null>(null);
   let modelId = $state<string | null>(null);
@@ -30,6 +53,11 @@
   let error = $state<string | null>(null);
   let logs = $state<string[]>([]);
   let showLogs = $state(false);
+  let recent = $state<RecentSession[]>([]);
+
+  let showOnboarding = $state(false);
+  let showKickoff = $state(false);
+  let permissionReq = $state<PermissionEvent | null>(null);
 
   let scrollEl: HTMLElement | undefined = $state();
   let unlisteners: UnlistenFn[] = [];
@@ -40,7 +68,6 @@
     return `${prefix}-${idSeq}`;
   }
 
-  /** Active streaming assistant / thought row indexes (append chunks). */
   let streamAssistantId: string | null = null;
   let streamThoughtId: string | null = null;
 
@@ -68,10 +95,7 @@
   function handleUpdate(kind: string, update: Record<string, unknown>) {
     const text = contentText(update);
 
-    if (kind === "user_message_chunk") {
-      // We already show the local user message; skip echo or soft-merge.
-      return;
-    }
+    if (kind === "user_message_chunk") return;
 
     if (kind === "agent_message_chunk") {
       if (streamAssistantId) {
@@ -114,17 +138,10 @@
         "tool";
       const toolStatus =
         (typeof update.status === "string" && update.status) || kind;
-      const detail =
-        typeof update.kind === "string" ? update.kind : undefined;
+      const detail = typeof update.kind === "string" ? update.kind : undefined;
       items = [
         ...items,
-        {
-          id: nid("tool"),
-          role: "tool",
-          title,
-          status: toolStatus,
-          detail,
-        },
+        { id: nid("tool"), role: "tool", title, status: toolStatus, detail },
       ];
       scrollToBottom();
       return;
@@ -132,34 +149,97 @@
 
     if (kind === "plan") {
       pushSystem("Plan update received");
-      return;
     }
-
-    // ignore available_commands_update and other chatter
   }
 
-  async function connect() {
+  async function pickFolder() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Choose project folder",
+      });
+      if (typeof selected === "string" && selected) {
+        cwd = selected;
+        setLastCwd(selected);
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function doConnect(opts: {
+    resumeSessionId?: string | null;
+    rules?: string | null;
+    alwaysApprove?: boolean;
+    clearChat?: boolean;
+  } = {}) {
     error = null;
     connecting = true;
     streamAssistantId = null;
     streamThoughtId = null;
+    const aa = opts.alwaysApprove ?? alwaysApprove;
     try {
-      const res = await acpConnect(cwd.trim());
+      const res = await acpConnect({
+        cwd: cwd.trim(),
+        alwaysApprove: aa,
+        resumeSessionId: opts.resumeSessionId ?? null,
+        rules: opts.rules ?? null,
+      });
       connected = true;
       sessionId = res.sessionId;
       modelId = res.modelId;
-      connectionMessage = `Session ${res.sessionId.slice(0, 8)}…`;
-      items = [];
+      alwaysApprove = res.alwaysApprove;
+      connectionMessage = res.resumed
+        ? `Resumed ${res.sessionId.slice(0, 8)}…`
+        : `Session ${res.sessionId.slice(0, 8)}…`;
+      setLastCwd(res.cwd);
+      saveRecentSession({
+        sessionId: res.sessionId,
+        cwd: res.cwd,
+        modelId: res.modelId,
+        updatedAt: Date.now(),
+      });
+      recent = loadRecentSessions();
+      if (opts.clearChat !== false) {
+        items = [];
+      }
       pushSystem(
-        `Connected to Grok Build${res.modelId ? ` · ${res.modelId}` : ""} · auto-approve on`,
+        `${res.resumed ? "Resumed" : "Connected"} · Grok Build${res.modelId ? ` · ${res.modelId}` : ""} · ${res.alwaysApprove ? "auto-approve" : "ask on tools"}`,
       );
+      return res;
     } catch (e) {
       connected = false;
       sessionId = null;
       error = e instanceof Error ? e.message : String(e);
+      return null;
     } finally {
       connecting = false;
     }
+  }
+
+  async function connect() {
+    await doConnect();
+  }
+
+  async function resume(s: RecentSession) {
+    cwd = s.cwd;
+    setLastCwd(s.cwd);
+    await doConnect({ resumeSessionId: s.sessionId });
+  }
+
+  async function launchKickoff(plan: KickoffPlan, _answers: KickoffAnswers) {
+    showKickoff = false;
+    alwaysApprove = plan.alwaysApprove;
+    const res = await doConnect({
+      rules: plan.rules,
+      alwaysApprove: plan.alwaysApprove,
+    });
+    if (!res) return;
+    pushSystem(`Kickoff plan: ${plan.summary}`);
+    // Fire the crafted starter prompt
+    prompt = plan.starterPrompt;
+    await sendPrompt();
   }
 
   async function disconnect() {
@@ -174,6 +254,7 @@
       modelId = null;
       connectionMessage = "";
       busy = false;
+      permissionReq = null;
       pushSystem("Disconnected");
     }
   }
@@ -197,6 +278,15 @@
       if (result.stopReason) {
         pushSystem(`Turn complete · ${result.stopReason}`);
       }
+      if (sessionId) {
+        saveRecentSession({
+          sessionId,
+          cwd: cwd.trim(),
+          modelId,
+          updatedAt: Date.now(),
+        });
+        recent = loadRecentSessions();
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       pushSystem(`Error: ${error}`);
@@ -207,6 +297,21 @@
     }
   }
 
+  async function replyPermission(optionId: string | null, cancelled = false) {
+    if (!permissionReq) return;
+    const requestId = permissionReq.requestId;
+    permissionReq = null;
+    try {
+      await acpRespondPermission({
+        requestId,
+        outcome: cancelled || !optionId ? "cancelled" : "selected",
+        optionId: optionId,
+      });
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   function onKeydown(e: KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -214,7 +319,14 @@
     }
   }
 
+  function finishOnboarding() {
+    setOnboardingDone();
+    showOnboarding = false;
+  }
+
   onMount(async () => {
+    recent = loadRecentSessions();
+    showOnboarding = !isOnboardingDone();
     await refreshStatus();
     unlisteners = await Promise.all([
       onAcpUpdate((ev) => handleUpdate(ev.kind, ev.update)),
@@ -230,6 +342,9 @@
       onAcpLog((msg) => {
         logs = [...logs.slice(-80), msg];
       }),
+      onAcpPermission((ev) => {
+        permissionReq = ev;
+      }),
     ]);
   });
 
@@ -240,6 +355,18 @@
     }
   });
 </script>
+
+{#if showOnboarding}
+  <Onboarding onDone={finishOnboarding} />
+{/if}
+
+<GuidedKickoff
+  open={showKickoff}
+  onClose={() => (showKickoff = false)}
+  onLaunch={launchKickoff}
+/>
+
+<PermissionModal request={permissionReq} onReply={replyPermission} />
 
 <div class="app">
   <header class="header">
@@ -252,7 +379,7 @@
             {connectionMessage || "Connected"}
             {#if modelId}<span class="pill">{modelId}</span>{/if}
           {:else if status?.ready}
-            CLI ready — connect a project
+            CLI ready — pick a folder or start Guided kickoff
           {:else}
             {status?.message ?? "Checking Grok CLI…"}
           {/if}
@@ -260,40 +387,97 @@
       </div>
     </div>
     <div class="header-actions">
+      <HelpTip title="How this works" label="?">
+        <p>
+          Grok Desktop is a thin shell over the official <strong>Grok Build</strong> CLI via ACP.
+        </p>
+        <ul>
+          <li><strong>Guided kickoff</strong> interviews you and writes a strong first prompt.</li>
+          <li><strong>Connect</strong> starts a free-form chat on a project folder.</li>
+          <li>Tools, models, and login live in <code>grok</code> — not reimplemented here.</li>
+        </ul>
+      </HelpTip>
+      <button type="button" class="btn ghost" onclick={() => (showOnboarding = true)}>Tour</button>
       <button type="button" class="btn ghost" onclick={refreshStatus} disabled={statusLoading}>
         CLI
       </button>
-      <button type="button" class="btn ghost" onclick={() => (showLogs = !showLogs)}>
-        Logs
-      </button>
+      <button type="button" class="btn ghost" onclick={() => (showLogs = !showLogs)}>Logs</button>
     </div>
   </header>
 
   <section class="toolbar">
-    <label class="cwd-label" for="cwd">Project folder</label>
-    <input
-      id="cwd"
-      class="cwd"
-      bind:value={cwd}
-      disabled={connected || connecting}
-      placeholder="/absolute/path/to/project"
-      spellcheck="false"
-    />
-    {#if connected}
-      <button type="button" class="btn danger" onclick={disconnect} disabled={busy}>
-        Disconnect
-      </button>
-    {:else}
+    <div class="cwd-row">
+      <label class="cwd-label" for="cwd">Project</label>
+      <input
+        id="cwd"
+        class="cwd"
+        bind:value={cwd}
+        disabled={connected || connecting}
+        placeholder="/absolute/path/to/project"
+        spellcheck="false"
+        onchange={() => setLastCwd(cwd)}
+      />
       <button
         type="button"
-        class="btn primary"
-        onclick={connect}
-        disabled={connecting || !status?.ready}
+        class="btn"
+        onclick={pickFolder}
+        disabled={connected || connecting}
       >
-        {connecting ? "Connecting…" : "Connect"}
+        Browse…
       </button>
-    {/if}
+    </div>
+    <div class="toolbar-actions">
+      <label class="check" class:disabled={connected}>
+        <input type="checkbox" bind:checked={alwaysApprove} disabled={connected || connecting} />
+        Auto-approve tools
+        <HelpTip title="Auto-approve" label="?">
+          <p>
+            When on, tools run without asking (faster vibe coding). When off, you’ll get a
+            permission popup if the agent requests one.
+          </p>
+        </HelpTip>
+      </label>
+      {#if !connected}
+        <button
+          type="button"
+          class="btn accent"
+          onclick={() => (showKickoff = true)}
+          disabled={connecting || !status?.ready}
+        >
+          Guided kickoff
+        </button>
+        <button
+          type="button"
+          class="btn primary"
+          onclick={connect}
+          disabled={connecting || !status?.ready}
+        >
+          {connecting ? "Connecting…" : "Connect"}
+        </button>
+      {:else}
+        <button type="button" class="btn danger" onclick={disconnect} disabled={busy}>
+          Disconnect
+        </button>
+      {/if}
+    </div>
   </section>
+
+  {#if !connected && recent.length > 0}
+    <section class="recent" aria-label="Recent sessions">
+      <span class="recent-label">Resume</span>
+      {#each recent.slice(0, 5) as s}
+        <button
+          type="button"
+          class="recent-chip"
+          disabled={connecting || !status?.ready}
+          onclick={() => resume(s)}
+          title={s.cwd}
+        >
+          {s.sessionId.slice(0, 8)}… · {s.cwd.split("/").filter(Boolean).slice(-2).join("/")}
+        </button>
+      {/each}
+    </section>
+  {/if}
 
   {#if error}
     <div class="banner bad" role="alert">{error}</div>
@@ -314,12 +498,22 @@
   <main class="chat" bind:this={scrollEl} aria-live="polite">
     {#if items.length === 0}
       <div class="empty">
+        <h2>Build with Grok — without fighting the terminal</h2>
         <p>
-          Connect to start an ACP session with <code>grok agent stdio</code>.
+          New here? Use <strong>Guided kickoff</strong>. We’ll ask a few questions, pick sensible
+          safety settings, and start Grok with a clear first prompt.
         </p>
         <p class="muted">
-          v1 uses <strong>auto-approve</strong> for tools. Permission UI comes next.
+          Or <strong>Browse…</strong> to a project → <strong>Connect</strong> → chat freely.
         </p>
+        <button
+          type="button"
+          class="btn accent"
+          onclick={() => (showKickoff = true)}
+          disabled={!status?.ready || connected}
+        >
+          Start guided kickoff
+        </button>
       </div>
     {:else}
       {#each items as item (item.id)}
@@ -331,13 +525,13 @@
         {:else if item.role === "assistant"}
           <article class="bubble assistant">
             <header>Grok</header>
-            <pre>{item.text}</pre>
+            <Markdown source={item.text} />
           </article>
         {:else if item.role === "thought"}
-          <article class="bubble thought">
-            <header>Thinking</header>
+          <details class="bubble thought">
+            <summary>Thinking</summary>
             <pre>{item.text}</pre>
-          </article>
+          </details>
         {:else if item.role === "tool"}
           <article class="bubble tool">
             <header>Tool · {item.status}</header>
@@ -361,8 +555,8 @@
       bind:value={prompt}
       onkeydown={onKeydown}
       placeholder={connected
-        ? "Message Grok Build… (Enter to send, Shift+Enter for newline)"
-        : "Connect to a project first"}
+        ? "Message Grok Build… (Enter send · Shift+Enter newline)"
+        : "Connect or use Guided kickoff first"}
       disabled={!connected || busy}
       rows="3"
     ></textarea>
@@ -398,7 +592,7 @@
   .app {
     height: 100vh;
     display: grid;
-    grid-template-rows: auto auto auto 1fr auto;
+    grid-template-rows: auto auto auto auto 1fr auto;
     min-height: 0;
   }
 
@@ -452,17 +646,24 @@
 
   .header-actions {
     display: flex;
+    align-items: center;
     gap: 0.4rem;
   }
 
   .toolbar {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
+    flex-direction: column;
+    gap: 0.55rem;
     padding: 0.65rem 1.1rem;
     border-bottom: 1px solid #1e2430;
     background: #10141b;
+  }
+
+  .cwd-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
   }
 
   .cwd-label {
@@ -472,7 +673,7 @@
 
   .cwd {
     flex: 1;
-    min-width: 200px;
+    min-width: 180px;
     background: #0d0f12;
     border: 1px solid #2a3344;
     border-radius: 8px;
@@ -485,6 +686,63 @@
   .cwd:focus {
     outline: none;
     border-color: #3b82f6;
+  }
+
+  .toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    justify-content: flex-end;
+  }
+
+  .check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+    color: #c5cad6;
+    margin-right: auto;
+  }
+
+  .check.disabled {
+    opacity: 0.6;
+  }
+
+  .recent {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 1.1rem;
+    border-bottom: 1px solid #1e2430;
+    background: #0e1218;
+  }
+
+  .recent-label {
+    font-size: 0.72rem;
+    color: #8b93a7;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .recent-chip {
+    border: 1px solid #2a3344;
+    background: #151922;
+    color: #c5cad6;
+    border-radius: 999px;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.72rem;
+    cursor: pointer;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+
+  .recent-chip:hover:not(:disabled) {
+    border-color: #3b82f6;
+  }
+
+  .recent-chip:disabled {
+    opacity: 0.5;
   }
 
   .banner {
@@ -527,9 +785,19 @@
   .empty {
     margin: auto;
     text-align: center;
-    max-width: 28rem;
+    max-width: 32rem;
     color: #c5cad6;
     line-height: 1.5;
+  }
+
+  .empty h2 {
+    margin: 0 0 0.6rem;
+    font-size: 1.15rem;
+    color: #e8eaed;
+  }
+
+  .empty .btn {
+    margin-top: 0.75rem;
   }
 
   .bubble {
@@ -539,12 +807,18 @@
     border: 1px solid #232a38;
   }
 
-  .bubble header {
+  .bubble header,
+  .thought summary {
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: #8b93a7;
     margin-bottom: 0.35rem;
+  }
+
+  .thought summary {
+    cursor: pointer;
+    list-style: none;
   }
 
   .bubble pre {
@@ -571,12 +845,13 @@
     align-self: flex-start;
     background: #14131c;
     border-color: #2e2a44;
-    opacity: 0.92;
+    opacity: 0.95;
   }
 
   .thought pre {
     font-size: 0.82rem;
     color: #a8a3c4;
+    margin-top: 0.35rem;
   }
 
   .tool {
@@ -664,6 +939,15 @@
 
   .btn.primary:hover:not(:disabled) {
     background: #2563eb;
+  }
+
+  .btn.accent {
+    background: #0f766e;
+    border-color: #14b8a6;
+  }
+
+  .btn.accent:hover:not(:disabled) {
+    background: #0d9488;
   }
 
   .btn.danger {

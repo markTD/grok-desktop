@@ -4,22 +4,17 @@
 **Stack:** Tauri 2 + SvelteKit (TS) + official Grok Build CLI via ACP  
 **License:** MIT (app); Grok Build remains under xAI / Apache-2.0 as upstream
 
-## Problem
+## Vision
 
-Grok Build is a strong coding agent (TUI + headless + ACP) with no first-party desktop GUI. Claude Desktop–style UX is what many people want: sessions, tool visibility, permission prompts — without rebuilding the agent.
+Make Grok Build **accessible to everyone who wants to vibe-code** — not only people who live in a TUI. Claude Desktop–style shell, plus a **guided kickoff** so you don’t need to be good at prompting.
 
-## Solution
+xAI open-sourcing the agent harness is extraordinary; this client is how we put a friendly front door on it.
 
-A **thin desktop client** that:
-
-1. Locates and probes the local `grok` binary  
-2. Speaks **Agent Client Protocol** to `grok agent stdio`  
-3. Renders streaming text, thoughts, tool calls, plans  
-4. Surfaces permission approve/deny in the UI  
+## Architecture
 
 ```
 ┌─────────────────────────────────────┐
-│  Grok Desktop (this repo)           │  chat, tools, permissions, sessions
+│  Grok Desktop (this repo)           │  chat, onboarding, kickoff, permissions
 └─────────────────┬───────────────────┘
                   │  ACP JSON-RPC
 ┌─────────────────▼───────────────────┐
@@ -27,41 +22,57 @@ A **thin desktop client** that:
 └─────────────────────────────────────┘
 ```
 
-## Non-goals (v1)
+## Features (current)
 
-- Reimplementing agent tools, sandbox, or MCP host  
+| Area | Status |
+|------|--------|
+| CLI probe (path, version, soft auth) | Done |
+| ACP connect / prompt / stream | Done |
+| Folder picker | Done |
+| Markdown assistant replies | Done |
+| Collapsible thinking | Done |
+| Auto-approve toggle | Done |
+| Permission request modal (when agent asks) | Done |
+| Session resume (`session/load` + recent list) | Done |
+| First-run tour + help tips | Done |
+| Guided kickoff (interview → rules + starter prompt) | Done |
+| Multi-agent token orchestration loops | Future |
+
+## Guided kickoff (prompt builder)
+
+A short interview collects:
+
+1. Goal (plain English)  
+2. Kind of work (existing / greenfield / fix / learn)  
+3. Risk (careful / balanced / fast+auto-approve) + plan-first  
+4. Optional constraints  
+
+We derive:
+
+- `session/new` `_meta.rules`  
+- A strong **starter prompt**  
+- Safety defaults  
+
+No model call is required for the interview — pure product logic so it stays free and fast.
+
+## Non-goals (for now)
+
+- Reimplementing agent tools / sandbox / MCP host  
 - Linking crates from `xai-org/grok-build`  
-- Multi-provider / Ollama / generic “cowork suite”  
-- Forking or contributing to the closed-contribution monorepo  
-
-## MVP checklist
-
-- [x] Project scaffold + git  
-- [x] `grok` binary resolve + version + soft auth (`grok models`)  
-- [x] ACP stdio spawn + `initialize` + `authenticate` + `session/new`  
-- [x] Stream `session/update` into UI (message / thought / tool)  
-- [x] Prompt turns via `session/prompt` (tools auto-approved for v1)  
-- [ ] Interactive permission approve / deny UI  
-- [ ] Native project folder picker  
-- [ ] README demo GIF + architecture  
+- Full multi-provider cowork suite  
 
 ## Auth & install
 
-Users need:
-
 - SuperGrok / supported xAI subscription (as required by Grok Build)  
 - CLI: `curl -fsSL https://x.ai/cli/install.sh | bash`  
-- Optional override: `GROK_BINARY=/path/to/grok`
-
-This app does **not** store API keys for the agent path; it reuses CLI OAuth (`~/.grok`).
+- Optional: `GROK_BINARY=/path/to/grok`
 
 ## Portfolio framing
 
-> Desktop ACP client for xAI Grok Build (Tauri/Svelte): process-managed agent sessions, streaming tool traces, and interactive permission UX over the Agent Client Protocol.
+> Desktop ACP client for xAI Grok Build (Tauri/Svelte): guided onboarding, streaming tool traces, session resume, and interactive permission UX over the Agent Client Protocol — so anyone can use a production coding agent without living in a TUI.
 
 ## References
 
 - [xai-org/grok-build](https://github.com/xai-org/grok-build)  
 - [Agent Client Protocol](https://agentclientprotocol.com)  
-- Grok agent mode: `grok agent stdio` / `grok agent serve`  
 - Install: https://x.ai/cli  

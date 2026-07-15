@@ -1,7 +1,9 @@
 mod acp;
 mod grok;
 
-use acp::{AcpState, ConnectResult, ConnectionInfo, PromptResult};
+use acp::{
+    AcpState, ConnectOptions, ConnectResult, ConnectionInfo, PermissionReply, PromptResult,
+};
 use grok::GrokStatus;
 use std::sync::Arc;
 use tauri::State;
@@ -15,10 +17,10 @@ fn grok_status() -> GrokStatus {
 async fn acp_connect(
     app: tauri::AppHandle,
     state: State<'_, Arc<AcpState>>,
-    cwd: String,
+    options: ConnectOptions,
 ) -> Result<ConnectResult, String> {
     let state = Arc::clone(&state);
-    tauri::async_runtime::spawn_blocking(move || acp::connect(app, &state, cwd))
+    tauri::async_runtime::spawn_blocking(move || acp::connect(app, &state, options))
         .await
         .map_err(|e| format!("connect task failed: {e}"))?
 }
@@ -36,6 +38,14 @@ async fn acp_prompt(
 }
 
 #[tauri::command]
+fn acp_respond_permission(
+    state: State<'_, Arc<AcpState>>,
+    reply: PermissionReply,
+) -> Result<(), String> {
+    acp::respond_permission(&state, reply)
+}
+
+#[tauri::command]
 fn acp_disconnect(state: State<'_, Arc<AcpState>>) -> Result<(), String> {
     acp::disconnect(&state)
 }
@@ -49,11 +59,13 @@ fn acp_connection(state: State<'_, Arc<AcpState>>) -> Result<ConnectionInfo, Str
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(AcpState::new()))
         .invoke_handler(tauri::generate_handler![
             grok_status,
             acp_connect,
             acp_prompt,
+            acp_respond_permission,
             acp_disconnect,
             acp_connection,
         ])

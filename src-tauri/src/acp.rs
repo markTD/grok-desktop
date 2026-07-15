@@ -1,10 +1,11 @@
-//! ACP client for `grok agent --always-approve stdio`.
+//! ACP client for `grok agent stdio`.
 //!
-//! Lifecycle: connect (initialize + authenticate + session/new) → prompt turns
-//! with streamed `session/update` events → disconnect.
+//! Lifecycle: connect (initialize + authenticate + session/new|load) → prompt
+//! turns with streamed `session/update` events → optional permission replies →
+//! disconnect.
 
 use crate::grok;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -21,6 +22,7 @@ const EVENT_UPDATE: &str = "acp://update";
 const EVENT_STATUS: &str = "acp://status";
 const EVENT_ERROR: &str = "acp://error";
 const EVENT_LOG: &str = "acp://log";
+const EVENT_PERMISSION: &str = "acp://permission";
 
 /// Shared app-level ACP handle.
 pub struct AcpState {
@@ -44,6 +46,20 @@ struct LiveSession {
     pending: Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>,
     running: Arc<AtomicBool>,
     reader: Option<thread::JoinHandle<()>>,
+    always_approve: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectOptions {
+    pub cwd: String,
+    /// When true, pass `--always-approve` to the agent.
+    #[serde(default)]
+    pub always_approve: bool,
+    /// Resume an existing session via `session/load`.
+    pub resume_session_id: Option<String>,
+    /// Extra rules appended to the system prompt (`session/new` `_meta.rules`).
+    pub rules: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -53,6 +69,8 @@ pub struct ConnectResult {
     pub cwd: String,
     pub model_id: Option<String>,
     pub binary_path: String,
+    pub resumed: bool,
+    pub always_approve: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -68,6 +86,7 @@ pub struct ConnectionInfo {
     pub connected: bool,
     pub session_id: Option<String>,
     pub cwd: Option<String>,
+    pub always_approve: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,11 +101,27 @@ struct StatusPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdatePayload {
-    /// Raw sessionUpdate kind (e.g. agent_message_chunk).
     kind: String,
-    /// Full update object from the agent.
     update: Value,
     session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionPayload {
+    request_id: u64,
+    tool_call: Option<Value>,
+    options: Vec<Value>,
+    raw: Value,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionReply {
+    pub request_id: u64,
+    /// `selected` | `cancelled`
+    pub outcome: String,
+    pub option_id: Option<String>,
 }
 
 fn emit_log(app: &AppHandle, msg: impl Into<String>) {
@@ -101,10 +136,11 @@ fn emit_status(app: &AppHandle, payload: StatusPayload) {
     let _ = app.emit(EVENT_STATUS, payload);
 }
 
-/// Connect: spawn agent, initialize, authenticate, create session.
-pub fn connect(app: AppHandle, state: &AcpState, cwd: String) -> Result<ConnectResult, String> {
+/// Connect: spawn agent, initialize, authenticate, create or load session.
+pub fn connect(app: AppHandle, state: &AcpState, opts: ConnectOptions) -> Result<ConnectResult, String> {
     disconnect(state)?;
 
+    let cwd = opts.cwd.trim().to_string();
     let cwd_path = PathBuf::from(&cwd);
     if !cwd_path.is_dir() {
         return Err(format!("Working directory is not a folder: {cwd}"));
@@ -115,10 +151,19 @@ pub fn connect(app: AppHandle, state: &AcpState, cwd: String) -> Result<ConnectR
     })?;
     let binary_path = bin.display().to_string();
 
-    emit_log(&app, format!("Spawning `{binary_path} agent --always-approve stdio`"));
+    let mut args = vec!["agent".to_string()];
+    if opts.always_approve {
+        args.push("--always-approve".into());
+    }
+    args.push("stdio".into());
+
+    emit_log(
+        &app,
+        format!("Spawning `{binary_path} {}`", args.join(" ")),
+    );
 
     let mut child = Command::new(&bin)
-        .args(["agent", "--always-approve", "stdio"])
+        .args(&args)
         .current_dir(&cwd_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -135,7 +180,6 @@ pub fn connect(app: AppHandle, state: &AcpState, cwd: String) -> Result<ConnectR
         .take()
         .ok_or_else(|| "Agent stdout missing".to_string())?;
 
-    // Drain stderr so the process never blocks on a full pipe.
     if let Some(stderr) = child.stderr.take() {
         let app_err = app.clone();
         thread::spawn(move || {
@@ -153,8 +197,8 @@ pub fn connect(app: AppHandle, state: &AcpState, cwd: String) -> Result<ConnectR
     let pending: Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>> =
         Arc::new(Mutex::new(HashMap::new()));
     let running = Arc::new(AtomicBool::new(true));
+    let stdin_for_reader = Arc::clone(&stdin);
 
-    // Reader thread: demux responses / notifications.
     let pending_r = Arc::clone(&pending);
     let running_r = Arc::clone(&running);
     let app_r = app.clone();
@@ -183,7 +227,7 @@ pub fn connect(app: AppHandle, state: &AcpState, cwd: String) -> Result<ConnectR
                             continue;
                         }
                     };
-                    handle_incoming(&app_r, &pending_r, &session_id_r, msg);
+                    handle_incoming(&app_r, &pending_r, &session_id_r, &stdin_for_reader, msg);
                 }
                 Err(e) => {
                     if running_r.load(Ordering::SeqCst) {
@@ -196,7 +240,6 @@ pub fn connect(app: AppHandle, state: &AcpState, cwd: String) -> Result<ConnectR
         running_r.store(false, Ordering::SeqCst);
     });
 
-    // Temporary session shell for request() before we know session_id.
     let bootstrap = Bootstrap {
         stdin: Arc::clone(&stdin),
         next_id: Arc::clone(&next_id),
@@ -204,7 +247,6 @@ pub fn connect(app: AppHandle, state: &AcpState, cwd: String) -> Result<ConnectR
         running: Arc::clone(&running),
     };
 
-    // initialize
     let init = bootstrap.request(
         "initialize",
         json!({
@@ -224,33 +266,53 @@ pub fn connect(app: AppHandle, state: &AcpState, cwd: String) -> Result<ConnectR
         .unwrap_or("cached_token")
         .to_string();
 
-    // authenticate
     let _auth = bootstrap.request(
         "authenticate",
         json!({ "methodId": default_auth }),
         Duration::from_secs(30),
     )?;
 
-    // session/new
-    let session = bootstrap.request(
-        "session/new",
-        json!({
+    let resumed = opts.resume_session_id.is_some();
+    let (session_id, model_id) = if let Some(resume_id) = opts.resume_session_id.clone() {
+        let session = bootstrap.request(
+            "session/load",
+            json!({
+                "sessionId": resume_id,
+                "cwd": cwd_path.to_string_lossy(),
+                "mcpServers": []
+            }),
+            Duration::from_secs(60),
+        )?;
+        let sid = session
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&resume_id)
+            .to_string();
+        let model_id = session
+            .pointer("/models/currentModelId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        (sid, model_id)
+    } else {
+        let mut params = json!({
             "cwd": cwd_path.to_string_lossy(),
             "mcpServers": []
-        }),
-        Duration::from_secs(60),
-    )?;
-
-    let session_id = session
-        .get("sessionId")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("session/new missing sessionId: {session}"))?
-        .to_string();
-
-    let model_id = session
-        .pointer("/models/currentModelId")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        });
+        if let Some(rules) = opts.rules.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            params["_meta"] = json!({ "rules": rules });
+        }
+        let session = bootstrap.request("session/new", params, Duration::from_secs(60))?;
+        let sid = session
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| format!("session/new missing sessionId: {session}"))?
+            .to_string();
+        let model_id = session
+            .pointer("/models/currentModelId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        (sid, model_id)
+    };
 
     *session_id_holder.lock().map_err(|e| e.to_string())? = Some(session_id.clone());
 
@@ -263,10 +325,16 @@ pub fn connect(app: AppHandle, state: &AcpState, cwd: String) -> Result<ConnectR
         pending,
         running,
         reader: Some(reader),
+        always_approve: opts.always_approve,
     };
 
     *state.inner.lock().map_err(|e| e.to_string())? = Some(live);
 
+    let mode = if opts.always_approve {
+        "auto-approve"
+    } else {
+        "ask on tools"
+    };
     emit_status(
         &app,
         StatusPayload {
@@ -274,12 +342,13 @@ pub fn connect(app: AppHandle, state: &AcpState, cwd: String) -> Result<ConnectR
             session_id: Some(session_id.clone()),
             cwd: Some(cwd.clone()),
             message: format!(
-                "Connected — session {}{}",
+                "{} · {}{}",
+                if resumed { "Resumed" } else { "Connected" },
                 &session_id[..8.min(session_id.len())],
                 model_id
                     .as_ref()
-                    .map(|m| format!(" · {m}"))
-                    .unwrap_or_default()
+                    .map(|m| format!(" · {m} · {mode}"))
+                    .unwrap_or_else(|| format!(" · {mode}"))
             ),
         },
     );
@@ -289,10 +358,11 @@ pub fn connect(app: AppHandle, state: &AcpState, cwd: String) -> Result<ConnectR
         cwd,
         model_id,
         binary_path,
+        resumed,
+        always_approve: opts.always_approve,
     })
 }
 
-/// Send a user prompt; streams session/update events until the turn completes.
 pub fn prompt(app: AppHandle, state: &AcpState, text: String) -> Result<PromptResult, String> {
     let text = text.trim().to_string();
     if text.is_empty() {
@@ -345,11 +415,46 @@ pub fn prompt(app: AppHandle, state: &AcpState, text: String) -> Result<PromptRe
     })
 }
 
+/// Reply to a `session/request_permission` from the agent.
+pub fn respond_permission(state: &AcpState, reply: PermissionReply) -> Result<(), String> {
+    let guard = state.inner.lock().map_err(|e| e.to_string())?;
+    let live = guard
+        .as_ref()
+        .ok_or_else(|| "Not connected".to_string())?;
+
+    let result = match reply.outcome.as_str() {
+        "cancelled" => json!({ "outcome": { "outcome": "cancelled" } }),
+        _ => {
+            let option_id = reply
+                .option_id
+                .ok_or_else(|| "optionId required for selected outcome".to_string())?;
+            json!({
+                "outcome": {
+                    "outcome": "selected",
+                    "optionId": option_id
+                }
+            })
+        }
+    };
+
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": reply.request_id,
+        "result": result
+    });
+
+    let mut stdin = live.stdin.lock().map_err(|e| e.to_string())?;
+    writeln!(stdin, "{msg}").map_err(|e| format!("Write permission reply failed: {e}"))?;
+    stdin
+        .flush()
+        .map_err(|e| format!("Flush permission reply failed: {e}"))?;
+    Ok(())
+}
+
 pub fn disconnect(state: &AcpState) -> Result<(), String> {
     let mut guard = state.inner.lock().map_err(|e| e.to_string())?;
     if let Some(mut live) = guard.take() {
         live.running.store(false, Ordering::SeqCst);
-        // Best-effort close stdin so the agent exits.
         drop(live.stdin.lock().ok());
         let _ = live.child.kill();
         let _ = live.child.wait();
@@ -367,11 +472,13 @@ pub fn connection_info(state: &AcpState) -> Result<ConnectionInfo, String> {
             connected: true,
             session_id: Some(live.session_id.clone()),
             cwd: Some(live.cwd.clone()),
+            always_approve: live.always_approve,
         }),
         _ => Ok(ConnectionInfo {
             connected: false,
             session_id: None,
             cwd: None,
+            always_approve: false,
         }),
     }
 }
@@ -434,21 +541,55 @@ impl Bootstrap {
     }
 }
 
+fn parse_id(msg: &Value) -> Option<u64> {
+    msg.get("id").and_then(|v| {
+        v.as_u64()
+            .or_else(|| v.as_i64().map(|i| i as u64))
+            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+    })
+}
+
 fn handle_incoming(
     app: &AppHandle,
     pending: &Mutex<HashMap<u64, Sender<Result<Value, String>>>>,
     session_id: &Mutex<Option<String>>,
+    stdin: &Mutex<ChildStdin>,
     msg: Value,
 ) {
-    // Response to our request
-    if let Some(id) = msg.get("id").and_then(|v| v.as_u64()).or_else(|| {
-        msg.get("id")
-            .and_then(|v| v.as_i64())
-            .map(|i| i as u64)
-    }) {
-        // Agent may send requests TO us with id+method (permissions, fs, …).
+    if let Some(id) = parse_id(&msg) {
+        // Agent → client request (permissions, etc.)
         if let Some(method) = msg.get("method").and_then(|v| v.as_str()) {
-            handle_agent_request(app, method, &msg);
+            if method == "session/request_permission" || method.ends_with("request_permission") {
+                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                let options = params
+                    .get("options")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let tool_call = params.get("toolCall").cloned();
+                let _ = app.emit(
+                    EVENT_PERMISSION,
+                    PermissionPayload {
+                        request_id: id,
+                        tool_call,
+                        options,
+                        raw: msg.clone(),
+                    },
+                );
+                return;
+            }
+
+            // Unknown agent request — cancel/error so the agent does not hang.
+            emit_log(app, format!("Unhandled agent request `{method}` id={id}"));
+            let err = json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32601, "message": format!("Method not supported by Grok Desktop: {method}") }
+            });
+            if let Ok(mut s) = stdin.lock() {
+                let _ = writeln!(s, "{err}");
+                let _ = s.flush();
+            }
             return;
         }
 
@@ -468,7 +609,6 @@ fn handle_incoming(
         return;
     }
 
-    // Notification
     if let Some(method) = msg.get("method").and_then(|v| v.as_str()) {
         match method {
             "session/update" => {
@@ -497,25 +637,10 @@ fn handle_incoming(
                 );
             }
             other => {
-                // x.ai/* noise → light log only for interesting ones
-                if other.starts_with("_x.ai/") || other.starts_with("x.ai/") {
-                    // suppress high-volume chatter in the UI log
-                } else {
+                if !(other.starts_with("_x.ai/") || other.starts_with("x.ai/")) {
                     emit_log(app, format!("notif {other}"));
                 }
             }
         }
     }
-}
-
-fn handle_agent_request(app: &AppHandle, method: &str, msg: &Value) {
-    // For the MVP we start with --always-approve, so permission requests should
-    // be rare. Still log anything unexpected that carries an id.
-    emit_log(
-        app,
-        format!(
-            "Agent request `{method}` (id={:?}) — not handled by client yet",
-            msg.get("id")
-        ),
-    );
 }
