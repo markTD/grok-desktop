@@ -97,11 +97,21 @@ See [docs/PRODUCT.md](docs/PRODUCT.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
-## Safety
+## Safety & data transparency
 
-- Default is **not** always-approve (you can enable for speed).  
-- Prefer **git repos** so you can diff/revert.  
-- The agent can edit files and run commands — treat it like a powerful junior on your machine.
+**Read [docs/SAFETY-AND-DATA.md](docs/SAFETY-AND-DATA.md)** before serious use.
+
+Short version:
+
+| Topic | Reality |
+|-------|---------|
+| Grok Desktop cloud? | **No** — local UI only |
+| Model / tool traffic | Goes through **official Grok Build CLI → xAI** (and MCP you enable) |
+| Sessions on disk | `~/.grok/sessions/` |
+| Your exports | Only if you click Export → `.grok-desktop/notes/` |
+| Safer exploring | Auto-approve **off**, use a **git** folder, prefer Learn / plan first |
+
+In the app: **Safety** button (or **More → Data & safety**). Account retention: Grok TUI `/privacy`.
 
 ---
 

@@ -18,6 +18,7 @@
     onOpenSession,
     onOpenPlan,
     onArsenal,
+    onSafety,
     canExport = false,
     canSession = false,
     exporting = false,
@@ -36,6 +37,7 @@
     onOpenSession: () => void;
     onOpenPlan: () => void;
     onArsenal: (text: string) => void;
+    onSafety: () => void;
     canExport?: boolean;
     canSession?: boolean;
     exporting?: boolean;
@@ -123,6 +125,7 @@
       <section>
         <h3>App</h3>
         <div class="actions">
+          <button type="button" class="btn warn-btn" onclick={onSafety}>Data & safety</button>
           <button type="button" class="btn" onclick={onBuild}>Build monitor</button>
           <button type="button" class="btn" onclick={onSetup}>Guided setup</button>
         </div>
@@ -264,6 +267,11 @@
   .btn.primary {
     background: #1d4ed8;
     border-color: #2563eb;
+  }
+
+  .btn.warn-btn {
+    border-color: #854d0e;
+    color: #fde68a;
   }
 
   .btn:disabled {

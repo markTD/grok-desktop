@@ -31,6 +31,8 @@
 
   let cliOk = $derived(!!status?.ready);
   let hasFolder = $derived(cwd.trim().length > 1);
+  // steps: 0 welcome, 1 install, 2 auth, 3 safety, 4 folder, 5 start
+  const totalSteps = 6;
 
   async function openInstallDocs() {
     try {
@@ -49,7 +51,7 @@
   }
 
   function next() {
-    if (step < 4) step += 1;
+    if (step < totalSteps - 1) step += 1;
     else onDone();
   }
 
@@ -60,7 +62,7 @@
 
 <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="setup-title">
   <div class="card">
-    <p class="step-label">Guided setup · {step + 1} / 5</p>
+    <p class="step-label">Guided setup · {step + 1} / {totalSteps}</p>
 
     {#if step === 0}
       <h2 id="setup-title">Welcome to Grok Desktop</h2>
@@ -69,7 +71,7 @@
         / X Premium+ subscribers. You create or learn in a project folder; Grok does the heavy tool
         work in the official CLI.
       </p>
-      <p class="muted">Takes about two minutes if the CLI is already installed.</p>
+      <p class="muted">We’ll cover install, sign-in, <strong>data transparency</strong>, then your folder.</p>
     {:else if step === 1}
       <h2 id="setup-title">Install Grok Build CLI</h2>
       <p class="body">In Terminal (macOS / Linux):</p>
@@ -109,10 +111,24 @@
         {/if}
       </p>
     {:else if step === 3}
+      <h2 id="setup-title">Data & safety (read this)</h2>
+      <p class="body">
+        <strong>This app is local.</strong> There is no separate Grok Desktop cloud. The
+        <strong>Grok Build CLI</strong> talks to <strong>xAI</strong> so the model can work —
+        prompts and files the agent reads may leave your machine.
+      </p>
+      <ul class="bullets">
+        <li>Sessions live under <code>~/.grok/sessions/</code></li>
+        <li>Keep <strong>auto-approve off</strong> while learning</li>
+        <li>Prefer a <strong>git repo</strong> so you can undo</li>
+        <li>Account retention: in the TUI run <code>/privacy</code></li>
+      </ul>
+      <p class="muted">Full details later: More → Data & safety, or docs/SAFETY-AND-DATA.md</p>
+    {:else if step === 4}
       <h2 id="setup-title">Choose a project folder</h2>
       <p class="body">
         Prefer a <strong>git repo</strong> (or make a new folder and <code>git init</code>). Grok
-        will work inside this path.
+        will work inside this path — not your whole home directory.
       </p>
       <pre class="code path">{cwd || "(none selected)"}</pre>
       <div class="row">
@@ -127,7 +143,7 @@
       </p>
     {:else}
       <h2 id="setup-title">How do you want to start?</h2>
-      <p class="body">Pick one — you can always use the others later from the toolbar.</p>
+      <p class="body">Pick one — safer for first runs: <strong>Learn</strong> or Kickoff with careful mode.</p>
       <div class="choices">
         <button
           type="button"
@@ -169,21 +185,16 @@
     {/if}
 
     <div class="actions">
-      {#if step > 0 && step < 4}
+      {#if step > 0 && step < totalSteps - 1}
         <button type="button" class="btn ghost" onclick={back}>Back</button>
       {:else}
         <span></span>
       {/if}
       <div class="right">
         <button type="button" class="btn ghost" onclick={onDone}>Skip setup</button>
-        {#if step < 4}
-          <button
-            type="button"
-            class="btn primary"
-            onclick={next}
-            disabled={(step === 1 || step === 2) && !cliOk && step > 0 ? false : false}
-          >
-            {step === 3 && !hasFolder ? "Continue anyway" : "Next"}
+        {#if step < totalSteps - 1}
+          <button type="button" class="btn primary" onclick={next}>
+            {step === 4 && !hasFolder ? "Continue anyway" : "Next"}
           </button>
         {:else}
           <button type="button" class="btn primary" onclick={onDone}>Close</button>
@@ -275,6 +286,14 @@
 
   .status.bad {
     color: #fca5a5;
+  }
+
+  .bullets {
+    margin: 0.5rem 0;
+    padding-left: 1.2rem;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    color: #c5cad6;
   }
 
   .choices {

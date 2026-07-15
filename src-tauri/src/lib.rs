@@ -2,6 +2,7 @@ mod acp;
 mod build_monitor;
 mod export;
 mod grok;
+mod privacy;
 mod project;
 
 use acp::{
@@ -10,6 +11,7 @@ use acp::{
 use build_monitor::BuildMonitor;
 use export::ExportResult;
 use grok::GrokStatus;
+use privacy::PrivacySnapshot;
 use project::{ProjectInfo, SessionPaths};
 use std::sync::Arc;
 use tauri::State;
@@ -99,6 +101,11 @@ fn export_session_notes(
     export::export_session_notes(cwd, markdown, suggested_name)
 }
 
+#[tauri::command]
+fn privacy_snapshot() -> PrivacySnapshot {
+    privacy::snapshot()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -111,6 +118,7 @@ pub fn run() {
             grok_run_update,
             project_info,
             session_paths,
+            privacy_snapshot,
             acp_connect,
             acp_prompt,
             acp_cancel,

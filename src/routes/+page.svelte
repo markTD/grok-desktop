@@ -29,8 +29,10 @@
   import {
     getLastCwd,
     isOnboardingDone,
+    isSafetyAcked,
     setLastCwd,
     setOnboardingDone,
+    setSafetyAcked,
   } from "$lib/storage";
   import type { OrchestrationLoop } from "$lib/loops";
   import { buildSessionMarkdown, wrapUpPrompt } from "$lib/notes";
@@ -58,6 +60,7 @@
   import OrchestrationPanel from "$lib/components/OrchestrationPanel.svelte";
   import BuildPanel from "$lib/components/BuildPanel.svelte";
   import MoreDrawer from "$lib/components/MoreDrawer.svelte";
+  import SafetyPanel from "$lib/components/SafetyPanel.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
 
   let status = $state<GrokStatus | null>(null);
@@ -86,6 +89,7 @@
   let showOrch = $state(false);
   let showMore = $state(false);
   let showBuild = $state(false);
+  let showSafety = $state(false);
   let showLogs = $state(false);
   let exporting = $state(false);
   let lastExportPath = $state<string | null>(null);
@@ -234,9 +238,23 @@
     }
     if (p.kind === "loop" && p.loopId) {
       showOrch = true;
-      // User still enters goal in the loop panel; goal can be prefilled via lastLoopGoal later
       return;
     }
+  }
+
+  function ackSafety() {
+    setSafetyAcked();
+  }
+
+  async function safeExplore() {
+    alwaysApprove = false;
+    showSafety = false;
+    setSafetyAcked();
+    showOrch = true;
+    // Learn loop is the safest multi-step path
+    pushSystem(
+      "Safe explore: auto-approve off. Use the Learn this codebase loop or Connect and ask read-only questions.",
+    );
   }
 
   async function scrollToBottom() {
@@ -690,12 +708,17 @@
 
   function finishSetup() {
     setOnboardingDone();
+    setSafetyAcked(); // setup includes data & safety step
     showSetup = false;
   }
 
   onMount(async () => {
     recent = loadRecentSessions();
     showSetup = !isOnboardingDone();
+    // After setup, still surface data transparency once
+    if (isOnboardingDone() && !isSafetyAcked()) {
+      showSafety = true;
+    }
     await refreshStatus();
     await refreshProject();
     refreshBuild(); // background — models list for More drawer
@@ -800,6 +823,19 @@
   onOpenSession={openSessionFolder}
   onOpenPlan={openPlanFile}
   onArsenal={runArsenal}
+  onSafety={() => {
+    showMore = false;
+    showSafety = true;
+  }}
+/>
+
+<SafetyPanel
+  open={showSafety}
+  alwaysApprove={alwaysApprove}
+  isGit={project?.isGit ?? true}
+  onClose={() => (showSafety = false)}
+  onAck={ackSafety}
+  onSafeExplore={safeExplore}
 />
 
 <div class="app">
@@ -851,9 +887,17 @@
         <ul>
           <li><strong>Paths</strong> — create, learn, or fix without prompt skills.</li>
           <li><strong>Loops</strong> — multi-step + automatic wrap-up summary.</li>
-          <li><strong>More</strong> — arsenal prompts, export, Build monitor/updates.</li>
+          <li><strong>Data & safety</strong> — what stays local vs goes to xAI.</li>
         </ul>
       </HelpTip>
+      <button
+        type="button"
+        class="btn ghost safety-btn"
+        onclick={() => (showSafety = true)}
+        title="Data & safety transparency"
+      >
+        Safety
+      </button>
       <button type="button" class="btn ghost" onclick={() => (showMore = true)}>More</button>
     </div>
   </header>
@@ -1279,6 +1323,11 @@
     border-bottom: 1px solid #854d0e;
     padding: 0.45rem 1.1rem;
     font-size: 0.82rem;
+  }
+
+  .safety-btn {
+    color: #fde68a !important;
+    border-color: #854d0e !important;
   }
 
   .empty-actions {
