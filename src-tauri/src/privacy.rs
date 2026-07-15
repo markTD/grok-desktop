@@ -11,15 +11,19 @@ pub struct PrivacySnapshot {
     pub grok_home: Option<String>,
     pub auth_cache_present: bool,
     pub sessions_dir_present: bool,
-    /// From config if present: [features] telemetry
+    /// Raw: [features] telemetry
     pub telemetry_enabled: Option<bool>,
-    /// From config if present: [telemetry] trace_upload
+    /// Raw: [telemetry] trace_upload
     pub trace_upload: Option<bool>,
-    /// From config if present: [ui] yolo or permission_mode
+    /// Plain status for laypeople: off | on | unknown
+    pub analytics_status: String,
+    /// e.g. "OFF", "ON", "NOT SURE"
+    pub analytics_label: String,
+    /// One short sentence for the UI card
+    pub analytics_detail: String,
     pub config_yolo: Option<bool>,
     pub config_permission_mode: Option<String>,
     pub config_path: Option<String>,
-    /// Human summary lines for the UI
     pub summary_lines: Vec<String>,
 }
 
@@ -41,36 +45,23 @@ pub fn snapshot() -> PrivacySnapshot {
         .map(|h| h.join("sessions").is_dir())
         .unwrap_or(false);
 
+    let (analytics_status, analytics_label, analytics_detail) =
+        analytics_plain(telemetry, trace_upload);
+
     let mut summary_lines = vec![
-        "Grok Desktop is a local UI. It does not run its own cloud backend."
+        "Grok Desktop has no cloud of its own.".into(),
+        "AI chat still uses Grok Build → xAI (prompts + files the agent opens)."
             .into(),
-        "Model calls and tool results go through the official Grok Build CLI → xAI (and any MCP you enabled)."
-            .into(),
-        "Sessions are stored under ~/.grok/sessions/ on this machine."
-            .into(),
-        "Exported notes (if you use Export) are written only under <project>/.grok-desktop/notes/."
-            .into(),
+        format!("Optional product analytics (usage stats): {analytics_label}. {analytics_detail}"),
+        "Session files stay under ~/.grok/sessions/ on this computer.".into(),
     ];
 
-    if let Some(t) = telemetry {
-        summary_lines.push(format!(
-            "Local config [features] telemetry = {t} (Grok Build anonymous telemetry switch)."
-        ));
-    } else {
-        summary_lines.push(
-            "Could not read [features] telemetry from config — open ~/.grok/config.toml or run /privacy in the TUI."
-                .into(),
-        );
-    }
-
     if let Some(ref mode) = perm_mode {
-        summary_lines.push(format!(
-            "Grok Build UI permission_mode in config: {mode}."
-        ));
+        summary_lines.push(format!("Grok permission_mode in config: {mode}."));
     }
 
     summary_lines.push(
-        "Account data-retention options: run `grok` TUI and use /privacy (plan-dependent)."
+        "How long xAI keeps coding data: check SuperGrok/xAI settings (TUI: /privacy)."
             .into(),
     );
 
@@ -80,6 +71,9 @@ pub fn snapshot() -> PrivacySnapshot {
         sessions_dir_present,
         telemetry_enabled: telemetry,
         trace_upload,
+        analytics_status,
+        analytics_label,
+        analytics_detail,
         config_yolo: yolo,
         config_permission_mode: perm_mode,
         config_path: config_path.map(|p| p.display().to_string()),
@@ -87,8 +81,42 @@ pub fn snapshot() -> PrivacySnapshot {
     }
 }
 
+/// Collapse telemetry + trace_upload into one layperson status.
+fn analytics_plain(
+    telemetry: Option<bool>,
+    trace_upload: Option<bool>,
+) -> (String, String, String) {
+    // Docs: trace_upload inherits the telemetry toggle when unset.
+    let effective_traces = match (telemetry, trace_upload) {
+        (_, Some(t)) => Some(t),
+        (Some(t), None) => Some(t),
+        (None, None) => None,
+    };
+
+    // effective_traces already folds “unset → follow telemetry”
+    match effective_traces {
+        Some(false) => (
+            "off".into(),
+            "OFF".into(),
+            "Your Grok config turns optional product analytics off. This is separate from AI chat (which still needs the network)."
+                .into(),
+        ),
+        Some(true) => (
+            "on".into(),
+            "ON".into(),
+            "Optional product analytics look enabled in config (usage stats for the product). This is not the same as “sending your whole repo,” but it is extra data. Turn off with telemetry = false under [features] in ~/.grok/config.toml, then Refresh."
+                .into(),
+        ),
+        None => (
+            "unknown".into(),
+            "NOT SURE".into(),
+            "We could not find a clear analytics setting in ~/.grok/config.toml. AI chat still works over the network. To force analytics off, add under [features]: telemetry = false — then Refresh. Account retention is separate: run grok and type /privacy."
+                .into(),
+        ),
+    }
+}
+
 fn parse_config_flags(toml: &str) -> (Option<bool>, Option<bool>, Option<bool>, Option<String>) {
-    // Lightweight line scan — avoids pulling a TOML crate for a few flags.
     let mut section = String::new();
     let mut telemetry = None;
     let mut trace_upload = None;

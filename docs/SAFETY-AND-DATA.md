@@ -16,6 +16,7 @@ This is the trust document for **Grok Desktop**. Skim the status board first.
 | Where is history stored on my Mac? | **Locally** under `~/.grok/sessions/` (official CLI). |
 | When do notes leave the project folder? | **Only if you click Export** → `.grok-desktop/notes/`. |
 | Who controls training / retention? | **xAI / your SuperGrok plan** — check **`/privacy`** inside the official `grok` TUI. This app cannot override that. |
+| “Telemetry / traces” — what is that? | **Optional product analytics** about the Grok tool (usage stats). **Not** the same as AI chat. Status in app: **OFF / ON / NOT SURE** from your `~/.grok/config.toml`. |
 
 ---
 
@@ -46,10 +47,17 @@ You → Grok Desktop (open source shell) → Grok Build CLI (xAI) → xAI models
 
 ### Layer 2 — Grok Build CLI (xAI harness)
 - File/shell/web tools, plan mode, subagents, sandbox options, MCP  
-- Config: `~/.grok/config.toml` (`telemetry`, permission modes, …)  
+- Config: `~/.grok/config.toml`  
 - Account privacy: TUI command **`/privacy`**
 
-**Limit:** Designed as a capable online coding agent.
+**Optional product analytics** (old words: telemetry / traces): usage stats about the *tool*, **not** “upload my whole app.” In the Safety panel this shows as **OFF / ON / NOT SURE**. To force off:
+
+```toml
+[features]
+telemetry = false
+```
+
+**Limit:** Designed as a capable online coding agent. AI chat still needs the network.
 
 ### Layer 3 — You
 - Use a **git project**, not `$HOME`  

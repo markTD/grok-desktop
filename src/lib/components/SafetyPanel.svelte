@@ -8,6 +8,10 @@
     sessionsDirPresent: boolean;
     telemetryEnabled: boolean | null;
     traceUpload: boolean | null;
+    /** off | on | unknown */
+    analyticsStatus: string;
+    analyticsLabel: string;
+    analyticsDetail: string;
     configYolo: boolean | null;
     configPermissionMode: string | null;
     configPath: string | null;
@@ -64,11 +68,6 @@
     }
   }
 
-  function flagLabel(v: boolean | null | undefined, on = "On", off = "Off"): string {
-    if (v === true) return on;
-    if (v === false) return off;
-    return "Unknown";
-  }
 </script>
 
 {#if open}
@@ -167,27 +166,31 @@
               </p>
             </article>
 
-            <article class="row-card" class:green={snap?.telemetryEnabled === false} class:yellow={snap?.telemetryEnabled !== false}>
+            <!-- One card — not "telemetry" + "traces" jargon -->
+            <article
+              class="row-card"
+              class:green={snap?.analyticsStatus === "off"}
+              class:yellow={snap?.analyticsStatus === "unknown" || !snap}
+              class:red={snap?.analyticsStatus === "on"}
+            >
               <header>
                 <span class="dot"></span>
-                <strong>Anonymous telemetry (Grok Build config)</strong>
-                <em>{flagLabel(snap?.telemetryEnabled)}</em>
+                <strong>Optional product analytics</strong>
+                <em>{snap?.analyticsLabel ?? "…"}</em>
               </header>
               <p>
-                CLI setting <code>[features] telemetry</code>. This is separate from “sending code
-                for the model.” Refresh after you change config.
+                {#if snap}
+                  {snap.analyticsDetail}
+                {:else if loading}
+                  Checking your Grok config…
+                {:else}
+                  Could not read analytics settings yet. Tap Refresh.
+                {/if}
               </p>
-            </article>
-
-            <article class="row-card" class:green={snap?.traceUpload === false} class:yellow={snap?.traceUpload !== false}>
-              <header>
-                <span class="dot"></span>
-                <strong>Session/trace upload (config)</strong>
-                <em>{flagLabel(snap?.traceUpload, "On/possible", "Off")}</em>
-              </header>
-              <p>
-                <code>[telemetry] trace_upload</code> in Grok config. If unknown, open config or the
-                official TUI.
+              <p class="subnote">
+                <strong>Not the same as AI chat.</strong> Chat still needs the internet so Grok can
+                answer. “Product analytics” means extra usage stats about the tool itself (crashes,
+                feature counts, etc.) if the Grok CLI is set to send them.
               </p>
             </article>
 
@@ -224,10 +227,11 @@
           {/if}
 
           <p class="note">
-            <strong>Account / training / retention</strong> (how long xAI keeps coding data) is set
-            by your <strong>SuperGrok / X plan and xAI policy</strong>, not by this app. In the
-            official Grok Build terminal, run <code>/privacy</code> for the source-of-truth
-            toggles. We show config we can read on disk; we cannot read every account setting.
+            <strong>How long xAI keeps your coding chats</strong> is an
+            <strong>account</strong> setting, not a line in this app. Open Terminal, run
+            <code>grok</code>, type <code>/privacy</code>, and use what xAI shows for your plan.
+            That screen is the authority for retention — we only report what’s in local config for
+            optional analytics.
           </p>
         </section>
       {:else if tab === "guardrails"}
@@ -309,9 +313,10 @@
               <code>/privacy</code> and set retention the way xAI offers for your plan.
             </li>
             <li>
-              <strong>Less analytics noise:</strong> in <code>~/.grok/config.toml</code> you can set
-              <code>telemetry = false</code> under <code>[features]</code> (see official docs).
-              Click Refresh below after changing.
+              <strong>Optional product analytics OFF:</strong> edit
+              <code>~/.grok/config.toml</code>, under <code>[features]</code> set
+              <code>telemetry = false</code>, save, then <strong>Refresh status</strong> here.
+              (Does not stop AI chat from using the network.)
             </li>
             <li>
               <strong>Review MCP/plugins</strong> you enabled — they can call outside services.
@@ -319,17 +324,25 @@
           </ol>
 
           <div class="config-box">
-            <h4>Config we can see on disk</h4>
+            <h4>Optional analytics status (simple)</h4>
             {#if loading}
               <p class="muted">Loading…</p>
             {:else if snap}
-              <ul class="plain">
-                <li>Telemetry: {flagLabel(snap.telemetryEnabled)}</li>
-                <li>Trace upload: {flagLabel(snap.traceUpload)}</li>
-                <li>CLI permission_mode: {snap.configPermissionMode ?? "not set"}</li>
-                <li>Auth cache: {snap.authCachePresent ? "yes" : "no"}</li>
-                <li>Path: <code>{snap.configPath ?? "—"}</code></li>
-              </ul>
+              <p class="analytics-big" class:off={snap.analyticsStatus === "off"} class:on={snap.analyticsStatus === "on"} class:unk={snap.analyticsStatus === "unknown"}>
+                {snap.analyticsLabel}
+              </p>
+              <p class="muted small">{snap.analyticsDetail}</p>
+              <p class="muted small mt">
+                Tech names in the file (if you care): telemetry =
+                {snap.telemetryEnabled === null ? "?" : String(snap.telemetryEnabled)},
+                trace_upload =
+                {snap.traceUpload === null ? "?" : String(snap.traceUpload)}. File:
+                <code>{snap.configPath ?? "—"}</code>
+              </p>
+              <p class="muted small">
+                Signed in locally: {snap.authCachePresent ? "yes" : "no"} · Permission mode:
+                {snap.configPermissionMode ?? "not set"}
+              </p>
             {:else}
               <p class="muted">No snapshot yet.</p>
             {/if}
@@ -579,6 +592,36 @@
     color: #86efac;
   }
 
+  .subnote {
+    margin: 0.4rem 0 0;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: #8b93a7;
+  }
+
+  .analytics-big {
+    margin: 0.25rem 0;
+    font-size: 1.35rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+  }
+
+  .analytics-big.off {
+    color: #86efac;
+  }
+
+  .analytics-big.on {
+    color: #fca5a5;
+  }
+
+  .analytics-big.unk {
+    color: #fde68a;
+  }
+
+  .mt {
+    margin-top: 0.45rem !important;
+  }
+
   .note {
     margin: 0.85rem 0 0;
     font-size: 0.8rem;
@@ -652,13 +695,6 @@
     border-radius: 10px;
     border: 1px solid #2a3344;
     background: #0d0f12;
-  }
-
-  .plain {
-    margin: 0.35rem 0 0;
-    padding-left: 1.1rem;
-    font-size: 0.82rem;
-    color: #a8b0c0;
   }
 
   .actions-block {
