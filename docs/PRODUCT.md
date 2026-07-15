@@ -38,10 +38,11 @@ A **thin desktop client** that:
 
 - [x] Project scaffold + git  
 - [x] `grok` binary resolve + version + soft auth (`grok models`)  
-- [ ] ACP stdio spawn + `initialize` + `session/new`  
-- [ ] Stream `session/update` into UI  
-- [ ] Permission requests  
-- [ ] Project folder picker  
+- [x] ACP stdio spawn + `initialize` + `authenticate` + `session/new`  
+- [x] Stream `session/update` into UI (message / thought / tool)  
+- [x] Prompt turns via `session/prompt` (tools auto-approved for v1)  
+- [ ] Interactive permission approve / deny UI  
+- [ ] Native project folder picker  
 - [ ] README demo GIF + architecture  
 
 ## Auth & install

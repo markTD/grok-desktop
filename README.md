@@ -10,14 +10,24 @@ This app does **not** reimplement the coding agent. It is a thin client around t
 
 ## Status
 
-**Phase 0 — bootstrapped**
+**Phase 1 — ACP chat spike**
 
 - [x] Tauri 2 + SvelteKit (TypeScript) scaffold  
-- [x] Locate `grok` (`PATH`, `~/.grok/bin/grok`, or `GROK_BINARY`)  
-- [x] Soft readiness check (`grok --version`, `grok models`)  
-- [ ] ACP session + streaming chat UI (next)
+- [x] Locate `grok` + soft readiness check  
+- [x] Spawn `grok agent --always-approve stdio`  
+- [x] `initialize` → `authenticate` (cached token) → `session/new`  
+- [x] Streaming chat: message / thought / tool updates  
+- [ ] Interactive permission UI (currently auto-approve)  
+- [ ] Folder picker dialog  
 
 See [docs/PRODUCT.md](docs/PRODUCT.md) for scope, non-goals, and MVP checklist.
+
+### Try the chat
+
+1. `npm run tauri dev`
+2. Confirm CLI status shows **Ready** and **Authenticated**
+3. Set **Project folder** to an absolute path
+4. **Connect** → type a message → **Send**
 
 ## Prerequisites
 
