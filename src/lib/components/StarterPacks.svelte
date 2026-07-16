@@ -50,8 +50,12 @@
       </header>
 
       <p class="lead">
-        After you build something, run a <strong>quality</strong> pack so it is safe and not
-        embarrassing to show.
+        After you build something, run a <strong>quality</strong> pack so it is safer and less
+        embarrassing to show. Quality packs are <strong>AI-assisted</strong> — not a guarantee.
+      </p>
+      <p class="caveat-banner">
+        Always <code>git diff</code> before you publish. Rotate any real secrets yourself. A
+        “SHARE” verdict is advice, not a certificate.
       </p>
 
       {#each groups as group}
@@ -76,6 +80,9 @@
         <div class="detail">
           <p class="why"><strong>Why:</strong> {selected.why}</p>
           <p class="host"><strong>Where it lives:</strong> {selected.hosting}</p>
+          {#if selected.caveat}
+            <p class="pack-caveat"><strong>Caveat:</strong> {selected.caveat}</p>
+          {/if}
           <label for="topic">Your detail (optional)</label>
           <input
             id="topic"
@@ -217,11 +224,32 @@
   }
 
   .why,
-  .host {
+  .host,
+  .pack-caveat {
     margin: 0 0 0.45rem;
     font-size: 0.82rem;
     color: #c5cad6;
     line-height: 1.4;
+  }
+
+  .pack-caveat {
+    color: #fde68a;
+  }
+
+  .caveat-banner {
+    margin: 0 0 0.65rem;
+    padding: 0.5rem 0.65rem;
+    border-radius: 8px;
+    border: 1px solid #854d0e;
+    background: #1a160c;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: #fde68a;
+  }
+
+  .caveat-banner code {
+    font-size: 0.85em;
+    color: #fbbf24;
   }
 
   label {

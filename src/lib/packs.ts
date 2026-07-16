@@ -3,7 +3,18 @@
  *
  * Hosting note: xAI does NOT host public websites. Packs that need a public URL
  * deploy to GitHub Pages / Vercel / Netlify (or run local only).
+ *
+ * Quality packs reduce risk; they do not guarantee perfect security or design.
  */
+
+/** Shown in UI and injected into quality pack session rules. */
+export const QUALITY_PACK_CAVEATS = [
+  "Caveats (be honest with the user):",
+  "- This review is AI-assisted. It can miss issues or be wrong. You are still responsible for what you ship.",
+  "- Always run git diff (or review changes) before publishing or posting a link.",
+  "- If secrets were ever committed, rotate them outside this chat — do not paste full secret values into the conversation.",
+  "- “Ship-ready” means “much safer and less embarrassing,” not “certified secure” or “enterprise audited.”",
+].join("\n");
 
 export type PackCategory = "build" | "quality" | "content";
 
@@ -29,6 +40,8 @@ export type StarterPack = {
   goalPlaceholder: string;
   /** Which orchestration loop to run, or null for single-shot */
   loopId: string | null;
+  /** Extra plain-language caveat for the packs UI */
+  caveat?: string;
 };
 
 export const PACK_CATEGORY_LABELS: Record<PackCategory, string> = {
@@ -144,15 +157,18 @@ export const STARTER_PACKS: StarterPack[] = [
     blurb: "Security + design + quality so you won’t be embarrassed to show it.",
     why: "AI-built apps often “work” but leak secrets, look amateur, or crash on demo day.",
     hosting: "Improves this project. Use git diff before you publish anything.",
+    caveat:
+      "AI review can miss things. Not a formal security audit. You still own what you ship.",
     explainMode: true,
     preferAutoApprove: false,
     rules: [
-      "Mission: make this project safe, solid, and presentable.",
-      "Never commit secrets. Flag .env, keys, tokens immediately.",
+      "Mission: make this project safer, solid, and presentable.",
+      "Never commit secrets. Flag .env, keys, tokens immediately — never paste full secret values.",
       "Prefer small high-impact fixes. Be honest if it is not demo-ready.",
+      QUALITY_PACK_CAVEATS,
     ].join("\n"),
     goalTemplate:
-      "Run a full ship-ready pass on this project. Focus area if any: {{topic}}. Priority: security first, then embarrassing UX, then code quality. Leave me a demo checklist.",
+      "Run a full ship-ready pass on this project. Focus area if any: {{topic}}. Priority: security first, then embarrassing UX, then code quality. Leave me a demo checklist. Be honest about residual risk.",
     goalPlaceholder: "Optional focus (e.g. login page, whole app)",
     loopId: "ship-ready",
   },
@@ -163,15 +179,18 @@ export const STARTER_PACKS: StarterPack[] = [
     blurb: "Find secrets, unsafe patterns, and risky defaults — then fix the worst.",
     why: "Vibe-coded apps often ship with keys in git and open endpoints.",
     hosting: "Report + patches in this repo. Rotate any real keys you find outside the agent.",
+    caveat:
+      "Not a penetration test or compliance cert. Rotate any real secrets yourself.",
     explainMode: true,
     preferAutoApprove: false,
     rules: [
       "Security-first auditor. Prefer read-only until Critical/High findings are listed.",
       "If secrets are found, instruct the user to rotate them (do not paste full secrets back).",
       "After the audit, fix Critical/High issues with minimal diffs when safe.",
+      QUALITY_PACK_CAVEATS,
     ].join("\n"),
     goalTemplate:
-      "Security audit this project. Focus: {{topic}}. List Critical/High/Medium/Low with paths, then fix Critical and High if safe. Never echo full secret values.",
+      "Security audit this project. Focus: {{topic}}. List Critical/High/Medium/Low with paths, then fix Critical and High if safe. Never echo full secret values. State residual risks clearly.",
     goalPlaceholder: "Optional: auth, API routes, env files…",
     loopId: "ship-ready",
   },
@@ -182,6 +201,7 @@ export const STARTER_PACKS: StarterPack[] = [
     blurb: "Make UI/copy look intentional — not placeholder or cringey.",
     why: "“It works but looks like 2009” kills trust faster than missing features.",
     hosting: "UI/copy changes in this project; preview locally.",
+    caveat: "Taste is subjective. Review the UI yourself before you share it.",
     explainMode: true,
     preferAutoApprove: false,
     rules: [
@@ -189,6 +209,7 @@ export const STARTER_PACKS: StarterPack[] = [
       "Fix: spacing, typography, contrast, mobile layout, empty/error states, awkward copy, lorem/TODO text.",
       "Keep brand simple and modern. No stock photo spam. Prefer consistency over novelty.",
       "Do not rewrite backend unless required for a UI bug.",
+      QUALITY_PACK_CAVEATS,
     ].join("\n"),
     goalTemplate:
       "Design polish this project so I would not be embarrassed to show a friend. Focus: {{topic}}. Fix the top visual and copy issues; keep it professional.",
@@ -202,6 +223,8 @@ export const STARTER_PACKS: StarterPack[] = [
     blurb: "Last look before you link it on X or send to someone.",
     why: "People share too early and get roasted for typos, broken mobile, or open .env.",
     hosting: "Checklist + fixes. You still decide when to post.",
+    caveat:
+      "Verdict is advisory. Double-check git status and secrets yourself before posting a link.",
     explainMode: true,
     preferAutoApprove: false,
     rules: [
@@ -209,9 +232,10 @@ export const STARTER_PACKS: StarterPack[] = [
       "Checklist: secrets, broken links, mobile, typos, README, how to run, obvious bugs, cringey copy.",
       "Fix quick wins. Be honest if it should not be shared yet.",
       "End with: SHARE / SHARE WITH CAVEATS / DO NOT SHARE YET and why.",
+      QUALITY_PACK_CAVEATS,
     ].join("\n"),
     goalTemplate:
-      "I am about to share this project (or post about it). Pre-share review. Context: {{topic}}. Fix quick wins; give a clear SHARE verdict.",
+      "I am about to share this project (or post about it). Pre-share review. Context: {{topic}}. Fix quick wins; give a clear SHARE verdict with caveats.",
     goalPlaceholder: "Where will you share? (X, friend, client…)",
     loopId: "ship-ready",
   },

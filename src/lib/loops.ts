@@ -281,10 +281,12 @@ export const ORCHESTRATION_LOOPS: OrchestrationLoop[] = [
     preferAutoApprove: false,
     rules: [
       "You are running a ship-ready quality loop in Grok Desktop.",
-      "Goal: code that is safe, competent, and not embarrassing to show others.",
+      "Goal: code that is safer, more competent, and less embarrassing to show others.",
       "Prioritize: secrets/security, crashes, broken UX, typos, amateur layout, missing README.",
       "Prefer small high-impact fixes over rewrites. Use git-friendly diffs.",
       "Be honest: if something is not ready to show, say so clearly.",
+      "Caveat: this is AI-assisted review, not a formal security audit or design certification.",
+      "Never paste full secret values into chat; tell the user to rotate secrets out-of-band.",
     ].join("\n"),
     steps: [
       {
@@ -353,6 +355,7 @@ export const ORCHESTRATION_LOOPS: OrchestrationLoop[] = [
             `Focus: ${goal}`,
             "Run available checks/tests. Produce a DEMO CHECKLIST: how to run, what to click, what not to show yet.",
             "List residual risks honestly. Confirm no secrets were introduced.",
+            "End with clear caveats: AI can miss issues; user must git diff and re-check secrets before public share.",
             joinPrior(prior),
           ].join("\n"),
       },

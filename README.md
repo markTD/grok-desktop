@@ -98,6 +98,10 @@ See [docs/PRODUCT.md](docs/PRODUCT.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
+## Quality packs (caveats)
+
+**Ship-ready / security / design / pre-share** packs help catch secrets, rough UI, and demo-killers. They are **AI-assisted**, not a formal security audit or design cert. Always `git diff` and re-check secrets before you publish a link. See pack UI caveats and [docs/PUBLIC-REPO-CHECKLIST.md](docs/PUBLIC-REPO-CHECKLIST.md).
+
 ## Safety & data transparency (trust first)
 
 **Read [docs/SAFETY-AND-DATA.md](docs/SAFETY-AND-DATA.md)** — written for laypeople.

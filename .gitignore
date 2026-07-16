@@ -12,3 +12,13 @@ vite.config.ts.timestamp-*
 .idea
 .vscode/*
 !.vscode/extensions.json
+
+# Local notes / agent output if someone exports into this repo
+.grok-desktop/
+*.pem
+*.p12
+*.key
+id_rsa*
+.secrets
+credentials.json
+auth.json

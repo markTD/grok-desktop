@@ -27,8 +27,10 @@ export function setExplainMode(on: boolean) {
   localStorage.setItem(EXPLAIN_KEY, on ? "1" : "0");
 }
 
-export function getLastCwd(fallback: string): string {
-  return localStorage.getItem(CWD_KEY) || fallback;
+export function getLastCwd(fallback = ""): string {
+  const stored = localStorage.getItem(CWD_KEY);
+  if (stored && stored.trim()) return stored;
+  return fallback;
 }
 
 export function setLastCwd(cwd: string) {
