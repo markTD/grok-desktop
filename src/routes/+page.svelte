@@ -39,6 +39,8 @@
   import type { OrchestrationLoop } from "$lib/loops";
   import { buildSessionMarkdown, wrapUpPrompt } from "$lib/notes";
   import { INTENT_PATHS } from "$lib/paths";
+  import { fillGoal, type StarterPack } from "$lib/packs";
+  import { getLoop } from "$lib/loops";
   import { mergeSessionRules, withExplainNudge } from "$lib/explain";
   import {
     accumulateUsage,
@@ -64,6 +66,7 @@
   import BuildPanel from "$lib/components/BuildPanel.svelte";
   import MoreDrawer from "$lib/components/MoreDrawer.svelte";
   import SafetyPanel from "$lib/components/SafetyPanel.svelte";
+  import StarterPacks from "$lib/components/StarterPacks.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
 
   let status = $state<GrokStatus | null>(null);
@@ -94,6 +97,7 @@
   let showMore = $state(false);
   let showBuild = $state(false);
   let showSafety = $state(false);
+  let showPacks = $state(false);
   let showLogs = $state(false);
   let exporting = $state(false);
   let lastExportPath = $state<string | null>(null);
@@ -244,6 +248,51 @@
       showOrch = true;
       return;
     }
+  }
+
+  async function launchPack(pack: StarterPack, topic: string) {
+    showPacks = false;
+    if (pack.explainMode) persistExplain(true);
+    const goal = fillGoal(pack.goalTemplate, topic);
+    lastLoopGoal = goal;
+    lastLoopName = pack.title;
+
+    if (pack.loopId) {
+      const loop = getLoop(pack.loopId);
+      if (!loop) {
+        error = `Unknown loop ${pack.loopId}`;
+        return;
+      }
+      // Merge pack rules into loop by temporary override via connect in startLoop
+      // Patch: startLoop uses loop.rules — prepend pack rules by wrapping
+      const merged = {
+        ...loop,
+        name: `${pack.title}`,
+        rules: [pack.rules, loop.rules].filter(Boolean).join("\n\n"),
+        preferAutoApprove: pack.preferAutoApprove,
+      };
+      await startLoop(merged, goal);
+      return;
+    }
+
+    // Single-shot pack: connect with pack rules then one prompt
+    alwaysApprove = pack.preferAutoApprove;
+    if (!connected) {
+      const res = await doConnect({
+        rules: pack.rules,
+        alwaysApprove: pack.preferAutoApprove,
+      });
+      if (!res) return;
+    }
+    items = [
+      ...items,
+      {
+        id: nid("loop"),
+        role: "loop",
+        text: `▶ Starter pack: ${pack.title}\n${pack.hosting}`,
+      },
+    ];
+    await runPromptTurn(goal);
   }
 
   function ackSafety() {
@@ -878,6 +927,13 @@
   onSafeExplore={safeExplore}
 />
 
+<StarterPacks
+  open={showPacks}
+  busy={busy || connecting || loopRunning}
+  onClose={() => (showPacks = false)}
+  onLaunch={launchPack}
+/>
+
 <div class="app">
   <header class="header">
     <div class="brand">
@@ -985,6 +1041,15 @@
       <button
         type="button"
         class="btn accent"
+        onclick={() => (showPacks = true)}
+        disabled={connecting || !status?.ready || (busy && !loopRunning)}
+        title="Personal site, landing page, X kit, and more"
+      >
+        Packs
+      </button>
+      <button
+        type="button"
+        class="btn accent"
         onclick={() => (showOrch = true)}
         disabled={connecting || !status?.ready || (busy && !loopRunning)}
       >
@@ -1018,6 +1083,15 @@
   {#if !connected}
     <section class="paths" aria-label="How do you want to work">
       <span class="paths-label">Start</span>
+      <button
+        type="button"
+        class="path-chip highlight"
+        disabled={!status?.ready}
+        title="Personal site, landing page, X content, local tools…"
+        onclick={() => (showPacks = true)}
+      >
+        Starter packs
+      </button>
       {#each INTENT_PATHS as p}
         <button
           type="button"
@@ -1078,11 +1152,23 @@
         <h2>Build with Grok — without the terminal fight</h2>
         <ol class="empty-steps">
           <li><strong>Project</strong> — Browse to a folder (git is best).</li>
-          <li><strong>Start</strong> — Create, Learn, Fix, or Kickoff.</li>
-          <li><strong>Explain</strong> — turn on if you want plain-language teaching.</li>
+          <li><strong>Starter packs</strong> — site, landing, X kit, local tool…</li>
+          <li><strong>Explain</strong> — plain-language teaching while it builds.</li>
           <li><strong>Safety</strong> — what data can leave your machine.</li>
         </ol>
+        <p class="muted host-note">
+          xAI does not host public websites. Packs run on your machine; public URLs use Pages /
+          Netlify / Vercel if you want them online.
+        </p>
         <div class="empty-actions">
+          <button
+            type="button"
+            class="btn primary"
+            onclick={() => (showPacks = true)}
+            disabled={!status?.ready}
+          >
+            Starter packs
+          </button>
           <button
             type="button"
             class="btn accent"
@@ -1090,14 +1176,6 @@
             disabled={!status?.ready}
           >
             Kickoff
-          </button>
-          <button
-            type="button"
-            class="btn primary"
-            onclick={() => (showOrch = true)}
-            disabled={!status?.ready}
-          >
-            Loops
           </button>
           <button type="button" class="btn" onclick={() => (showSafety = true)}>Safety</button>
         </div>
@@ -1349,6 +1427,19 @@
 
   .path-chip:disabled {
     opacity: 0.45;
+  }
+
+  .path-chip.highlight {
+    border-color: #2563eb;
+    background: #1a2744;
+    color: #bfdbfe;
+  }
+
+  .host-note {
+    max-width: 26rem;
+    margin: 0 auto 0.75rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
   }
 
   .git-badge {

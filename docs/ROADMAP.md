@@ -53,17 +53,19 @@ In-app, not a separate product:
 
 **Exit criteria:** A Premium+ friend can use it without you on a call.
 
-### Step E — Starter project packs *(parked until D)*
-Your good idea — **after** the path is simple:
+### Step E — Starter project packs
+In-app **Packs** (content + loop presets). xAI does **not** host public sites — packs document local run + Pages/Netlify/Vercel.
 
-| Pack | Outcome |
-|------|---------|
-| Personal site | Static site scaffold + deploy notes |
-| “Ship on X” | Thread/post helper using Grok/X strengths |
-| Voice / media | Thin starter around Grok media tools |
-| Learn-to-code | Toy repo + learn loop presets |
-
-These are **content + loop presets**, not a new architecture. Build one pack well before five.
+| Pack | Status |
+|------|--------|
+| Personal website | Shipped |
+| Product landing page | Shipped |
+| X / social content kit | Shipped |
+| Local utility app | Shipped |
+| Learn this codebase | Shipped |
+| Fix something broken | Shipped |
+| Voice / media (Imagine) | Future |
+| Full SaaS + auth + DB | Out of scope for packs (needs real hosting stack) |
 
 ---
 
@@ -112,7 +114,7 @@ Track and update the Grok Build CLI itself from the desktop shell:
 | D | Paths + Safety + **Explain mode**; GIF optional |
 | Build monitor | Done |
 | Trust / safety | Done (keep iterating if users confuse) |
-| E | Parked (starter packs) |
-| Optional next | Demo GIF · one starter pack · your own use testing |
+| E | First 6 packs shipped; voice/media later |
+| Optional next | Demo GIF · more packs · use-testing |
 
 Last updated: 2026-07-15

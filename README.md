@@ -35,6 +35,7 @@ xAI open-sourced the Grok Build harness. The agent is excellent; the default sur
 | **Cancel** | Stop an in-flight turn |
 | **CLI / Build monitor** | Version chip, update check, `grok update`, models list |
 | **Start paths** | Create / Learn / Fix / Interview without prompt skills |
+| **Starter packs** | Personal site, landing, X content kit, local tool, learn, fix |
 | **Arsenal prompts** | Plan mode, explore subagents, worktree, review, web/X |
 | **Git safety** | Warns when auto-approve + non-git folder |
 
