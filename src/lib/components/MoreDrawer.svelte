@@ -7,7 +7,8 @@
     open = false,
     connected = false,
     alwaysApprove = $bindable(false),
-    explainMode = $bindable(false),
+    explainMode = false,
+    onExplainChange,
     effortChoice = $bindable("high"),
     modelChoice = $bindable(""),
     models = [] as ModelInfo[],
@@ -30,6 +31,7 @@
     connected?: boolean;
     alwaysApprove?: boolean;
     explainMode?: boolean;
+    onExplainChange?: (on: boolean) => void;
     effortChoice?: string;
     modelChoice?: string;
     models?: ModelInfo[];
@@ -61,7 +63,11 @@
       <section>
         <h3>How Grok talks to you</h3>
         <label class="check">
-          <input type="checkbox" bind:checked={explainMode} />
+          <input
+            type="checkbox"
+            checked={explainMode}
+            onchange={(e) => onExplainChange?.((e.currentTarget as HTMLInputElement).checked)}
+          />
           Explain mode
           <HelpTip title="Explain mode" label="?">
             <p>

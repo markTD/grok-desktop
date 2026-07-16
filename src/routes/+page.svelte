@@ -402,15 +402,6 @@
     }
   }
 
-  // Persist when toggled from More drawer (bind)
-  let explainPrev = explainMode;
-  $effect(() => {
-    if (explainMode !== explainPrev) {
-      setExplainMode(explainMode);
-      explainPrev = explainMode;
-    }
-  });
-
   async function doConnect(opts: {
     resumeSessionId?: string | null;
     rules?: string | null;
@@ -838,18 +829,25 @@
   open={showMore}
   connected={connected}
   bind:alwaysApprove
-  bind:explainMode
   bind:effortChoice
   bind:modelChoice
+  explainMode={explainMode}
   models={buildReport?.models ?? []}
   isGit={project?.isGit ?? true}
   showLogs={showLogs}
   canExport={items.length > 0}
   canSession={!!sessionId}
   exporting={exporting}
-  onClose={() => {
-    setExplainMode(explainMode);
-    showMore = false;
+  onClose={() => (showMore = false)}
+  onExplainChange={(on) => {
+    persistExplain(on);
+    if (connected) {
+      pushSystem(
+        on
+          ? "Explain mode ON — Grok will teach in plain language."
+          : "Explain mode OFF — normal concise style.",
+      );
+    }
   }}
   onExport={exportNotes}
   onSetup={() => {
