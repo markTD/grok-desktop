@@ -27,9 +27,11 @@
   } from "$lib/build";
   import { loadRecentSessions, saveRecentSession } from "$lib/sessions";
   import {
+    getExplainMode,
     getLastCwd,
     isOnboardingDone,
     isSafetyAcked,
+    setExplainMode,
     setLastCwd,
     setOnboardingDone,
     setSafetyAcked,
@@ -37,6 +39,7 @@
   import type { OrchestrationLoop } from "$lib/loops";
   import { buildSessionMarkdown, wrapUpPrompt } from "$lib/notes";
   import { INTENT_PATHS } from "$lib/paths";
+  import { mergeSessionRules, withExplainNudge } from "$lib/explain";
   import {
     accumulateUsage,
     emptyUsage,
@@ -68,6 +71,7 @@
 
   let cwd = $state(getLastCwd(""));
   let alwaysApprove = $state(false);
+  let explainMode = $state(getExplainMode());
   let modelChoice = $state("");
   let effortChoice = $state("high");
   let connected = $state(false);
@@ -248,12 +252,12 @@
 
   async function safeExplore() {
     alwaysApprove = false;
+    persistExplain(true);
     showSafety = false;
     setSafetyAcked();
     showOrch = true;
-    // Learn loop is the safest multi-step path
     pushSystem(
-      "Safe explore: auto-approve off. Use the Learn this codebase loop or Connect and ask read-only questions.",
+      "Safe explore: auto-approve off + explain mode on. Use Learn this codebase, or Connect and ask questions.",
     );
   }
 
@@ -381,6 +385,32 @@
     }
   }
 
+  function persistExplain(on: boolean) {
+    explainMode = on;
+    setExplainMode(on);
+  }
+
+  function toggleExplainFromUi() {
+    const next = !explainMode;
+    persistExplain(next);
+    if (connected) {
+      pushSystem(
+        next
+          ? "Explain mode ON — Grok will teach in plain language (applies to the next messages)."
+          : "Explain mode OFF — back to normal concise style.",
+      );
+    }
+  }
+
+  // Persist when toggled from More drawer (bind)
+  let explainPrev = explainMode;
+  $effect(() => {
+    if (explainMode !== explainPrev) {
+      setExplainMode(explainMode);
+      explainPrev = explainMode;
+    }
+  });
+
   async function doConnect(opts: {
     resumeSessionId?: string | null;
     rules?: string | null;
@@ -397,12 +427,13 @@
     connecting = true;
     streamAssistantId = null;
     streamThoughtId = null;
+    const rules = mergeSessionRules(opts.rules, explainMode);
     try {
       const res = await acpConnect({
         cwd: cwd.trim(),
         alwaysApprove: aa,
         resumeSessionId: opts.resumeSessionId ?? null,
-        rules: opts.rules ?? null,
+        rules,
         model: modelChoice.trim() || null,
         effort: effortChoice.trim() || null,
       });
@@ -428,7 +459,7 @@
         usage = emptyUsage();
       }
       pushSystem(
-        `${res.resumed ? "Resumed" : "Connected"} · Grok Build${res.modelId ? ` · ${res.modelId}` : ""} · ${res.alwaysApprove ? "auto-approve" : "ask on tools"}${effortChoice ? ` · effort ${effortChoice}` : ""}`,
+        `${res.resumed ? "Resumed" : "Connected"} · Grok Build${res.modelId ? ` · ${res.modelId}` : ""} · ${res.alwaysApprove ? "auto-approve" : "ask on tools"}${effortChoice ? ` · effort ${effortChoice}` : ""}${explainMode ? " · explain mode" : ""}`,
       );
       return res;
     } catch (e) {
@@ -497,6 +528,7 @@
     busy = true;
     streamAssistantId = null;
     streamThoughtId = null;
+    // UI shows the user's text; wire includes explain nudge if needed
     items = [...items, { id: nid("user"), role: "user", text }];
     if (opts.showInComposer !== false) {
       /* no-op: caller clears composer when needed */
@@ -504,7 +536,7 @@
     await scrollToBottom();
 
     try {
-      const result = await acpPrompt(text);
+      const result = await acpPrompt(withExplainNudge(text, explainMode));
       streamAssistantId = null;
       streamThoughtId = null;
       usage = accumulateUsage(usage, result.meta);
@@ -806,14 +838,19 @@
   open={showMore}
   connected={connected}
   bind:alwaysApprove
+  bind:explainMode
   bind:effortChoice
   bind:modelChoice
   models={buildReport?.models ?? []}
   isGit={project?.isGit ?? true}
+  showLogs={showLogs}
   canExport={items.length > 0}
   canSession={!!sessionId}
   exporting={exporting}
-  onClose={() => (showMore = false)}
+  onClose={() => {
+    setExplainMode(explainMode);
+    showMore = false;
+  }}
   onExport={exportNotes}
   onSetup={() => {
     showMore = false;
@@ -826,6 +863,10 @@
   onSafety={() => {
     showMore = false;
     showSafety = true;
+  }}
+  onToggleLogs={() => {
+    showLogs = !showLogs;
+    showMore = false;
   }}
 />
 
@@ -849,6 +890,7 @@
           {#if connected}
             {connectionMessage || "Connected"}
             {#if modelId}<span class="pill">{modelId}</span>{/if}
+            {#if explainMode}<span class="pill explain-pill">explain</span>{/if}
             {#if usage.turns > 0}<span class="pill muted-pill">{formatUsage(usage)}</span>{/if}
             {#if project?.branch}<span class="pill muted-pill">{project.branch}</span>{/if}
           {:else if status?.ready}
@@ -934,6 +976,14 @@
       {/if}
     </div>
     <div class="toolbar-actions">
+      <label class="explain-toggle" title="Teach in plain language while working">
+        <input
+          type="checkbox"
+          checked={explainMode}
+          onchange={toggleExplainFromUi}
+        />
+        Explain
+      </label>
       <button
         type="button"
         class="btn accent"
@@ -1027,15 +1077,13 @@
   <main class="chat" bind:this={scrollEl} aria-live="polite">
     {#if items.length === 0}
       <div class="empty">
-        <h2>Build with Grok — without fighting the terminal</h2>
-        <p>
-          Choose a <strong>Start</strong> path above (create / learn / fix), or open
-          <strong>More</strong> for Build updates, arsenal prompts, and export.
-        </p>
-        <p class="muted">
-          Tip: click the green version chip anytime to open <strong>Build monitor</strong>
-          (update CLI, see models).
-        </p>
+        <h2>Build with Grok — without the terminal fight</h2>
+        <ol class="empty-steps">
+          <li><strong>Project</strong> — Browse to a folder (git is best).</li>
+          <li><strong>Start</strong> — Create, Learn, Fix, or Kickoff.</li>
+          <li><strong>Explain</strong> — turn on if you want plain-language teaching.</li>
+          <li><strong>Safety</strong> — what data can leave your machine.</li>
+        </ol>
         <div class="empty-actions">
           <button
             type="button"
@@ -1043,7 +1091,7 @@
             onclick={() => (showKickoff = true)}
             disabled={!status?.ready}
           >
-            Guided kickoff
+            Kickoff
           </button>
           <button
             type="button"
@@ -1051,9 +1099,9 @@
             onclick={() => (showOrch = true)}
             disabled={!status?.ready}
           >
-            Run a loop
+            Loops
           </button>
-          <button type="button" class="btn" onclick={openBuildPanel}>Build monitor</button>
+          <button type="button" class="btn" onclick={() => (showSafety = true)}>Safety</button>
         </div>
       </div>
     {:else}
@@ -1069,8 +1117,8 @@
             <Markdown source={item.text} />
           </article>
         {:else if item.role === "thought"}
-          <details class="bubble thought">
-            <summary>Thinking</summary>
+          <details class="bubble thought" open={explainMode}>
+            <summary>Thinking{explainMode ? " (explain mode keeps this open)" : ""}</summary>
             <pre>{item.text}</pre>
           </details>
         {:else if item.role === "tool"}
@@ -1102,13 +1150,18 @@
   </main>
 
   <footer class="composer">
+    {#if explainMode && connected}
+      <div class="composer-hint">Explain mode on — answers should teach as they go.</div>
+    {/if}
     <textarea
       bind:value={prompt}
       onkeydown={onKeydown}
       placeholder={connected
         ? loopRunning
           ? "Loop running — wait or Cancel…"
-          : "Message Grok Build… (Enter send · Shift+Enter newline)"
+          : explainMode
+            ? "Ask anything — Grok will explain as it works… (Enter send)"
+            : "Message Grok Build… (Enter send · Shift+Enter newline)"
         : "Connect, Kickoff, or Loops first"}
       disabled={!connected || busy || loopRunning}
       rows="3"
@@ -1330,6 +1383,50 @@
     color: #fde68a !important;
     border-color: #854d0e !important;
   }
+
+  .explain-pill {
+    color: #c4b5fd !important;
+    border-color: #5b21b6 !important;
+    background: #1e1b2e !important;
+  }
+
+  .explain-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+    color: #c5cad6;
+    cursor: pointer;
+    user-select: none;
+    padding: 0.3rem 0.55rem;
+    border-radius: 8px;
+    border: 1px solid #2a3344;
+    background: #151922;
+  }
+
+  .explain-toggle:has(input:checked) {
+    border-color: #7c3aed;
+    background: #1e1b2e;
+    color: #ddd6fe;
+  }
+
+  .composer-hint {
+    grid-column: 1 / -1;
+    font-size: 0.75rem;
+    color: #c4b5fd;
+    margin-bottom: -0.25rem;
+  }
+
+  .empty-steps {
+    text-align: left;
+    margin: 0.75rem auto 1rem;
+    padding-left: 1.25rem;
+    max-width: 22rem;
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: #c5cad6;
+  }
+
 
   .empty-actions {
     display: flex;
@@ -1583,6 +1680,7 @@
     padding: 0.75rem 1.1rem 1rem;
     border-top: 1px solid #1e2430;
     background: #12151a;
+    align-items: end;
   }
 
   textarea {

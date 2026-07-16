@@ -46,10 +46,10 @@ Toolbar is getting busy. Collapse into:
 ### Step D — How-to / teaching layer
 In-app, not a separate product:
 
-1. Short “paths” copy: *Create something* vs *Learn this repo* vs *Fix a bug*  
-2. Tooltips that explain *why* a step exists (explore saves tokens, etc.)  
-3. Optional “explain mode” toggle (already partly in learn loop)  
-4. README + 60s GIF for GitHub / portfolio  
+1. Short “paths” copy: *Create something* vs *Learn this repo* vs *Fix a bug* — **done**  
+2. Tooltips / trust center — **done** (Safety)  
+3. Optional **Explain mode** toggle — **done** (toolbar + More; session rules + per-turn nudge)  
+4. README + 60s GIF for GitHub / portfolio — **GIF still open**  
 
 **Exit criteria:** A Premium+ friend can use it without you on a call.
 
@@ -108,12 +108,11 @@ Track and update the Grok Build CLI itself from the desktop shell:
 
 | Step | Status |
 |------|--------|
-| A | Done |
-| B | B1–B3 + session/plan open |
-| C | Primary toolbar + More drawer |
-| D | Start paths + arsenal + trust center (data status / harness) |
-| Build monitor | Shipped |
-| Trust / safety UX | Status board + guardrails tabs (iterate on clarity) |
-| E | Parked |
+| A–C | Done |
+| D | Paths + Safety + **Explain mode**; GIF optional |
+| Build monitor | Done |
+| Trust / safety | Done (keep iterating if users confuse) |
+| E | Parked (starter packs) |
+| Optional next | Demo GIF · one starter pack · your own use testing |
 
 Last updated: 2026-07-15

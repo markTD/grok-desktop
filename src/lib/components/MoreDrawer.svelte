@@ -7,10 +7,12 @@
     open = false,
     connected = false,
     alwaysApprove = $bindable(false),
+    explainMode = $bindable(false),
     effortChoice = $bindable("high"),
     modelChoice = $bindable(""),
     models = [] as ModelInfo[],
     isGit = true,
+    showLogs = false,
     onClose,
     onExport,
     onSetup,
@@ -19,6 +21,7 @@
     onOpenPlan,
     onArsenal,
     onSafety,
+    onToggleLogs,
     canExport = false,
     canSession = false,
     exporting = false,
@@ -26,10 +29,12 @@
     open?: boolean;
     connected?: boolean;
     alwaysApprove?: boolean;
+    explainMode?: boolean;
     effortChoice?: string;
     modelChoice?: string;
     models?: ModelInfo[];
     isGit?: boolean;
+    showLogs?: boolean;
     onClose: () => void;
     onExport: () => void;
     onSetup: () => void;
@@ -38,6 +43,7 @@
     onOpenPlan: () => void;
     onArsenal: (text: string) => void;
     onSafety: () => void;
+    onToggleLogs: () => void;
     canExport?: boolean;
     canSession?: boolean;
     exporting?: boolean;
@@ -53,8 +59,28 @@
       </header>
 
       <section>
+        <h3>How Grok talks to you</h3>
+        <label class="check">
+          <input type="checkbox" bind:checked={explainMode} />
+          Explain mode
+          <HelpTip title="Explain mode" label="?">
+            <p>
+              Teach while working: plain language, short “why” before big edits, and how to verify
+              after. Good for learning. Works mid-session; reconnect applies it as a full session
+              rule too.
+            </p>
+          </HelpTip>
+        </label>
+        <p class="muted small">
+          {explainMode
+            ? "On — Grok will teach as it goes."
+            : "Off — normal concise coding agent style."}
+        </p>
+      </section>
+
+      <section>
         <h3>Session controls</h3>
-        <p class="muted small">Applied on next <strong>Connect</strong> (not mid-session).</p>
+        <p class="muted small">Model / effort / auto-approve apply on next <strong>Connect</strong>.</p>
         <label class="row">
           <span>Effort</span>
           <select bind:value={effortChoice} disabled={connected}>
@@ -128,6 +154,9 @@
           <button type="button" class="btn warn-btn" onclick={onSafety}>Data & safety</button>
           <button type="button" class="btn" onclick={onBuild}>Build monitor</button>
           <button type="button" class="btn" onclick={onSetup}>Guided setup</button>
+          <button type="button" class="btn" onclick={onToggleLogs}>
+            {showLogs ? "Hide debug log" : "Show debug log"}
+          </button>
         </div>
       </section>
 
