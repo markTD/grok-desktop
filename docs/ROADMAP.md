@@ -64,8 +64,12 @@ In-app **Packs** (content + loop presets). xAI does **not** host public sites �
 | Local utility app | Shipped |
 | Learn this codebase | Shipped |
 | Fix something broken | Shipped |
-| Voice / media (Imagine) | Future |
-| Full SaaS + auth + DB | Out of scope for packs (needs real hosting stack) |
+| **Ship-ready check** (security→design→quality→fix) | Shipped |
+| **Security audit** | Shipped |
+| **Design polish** | Shipped |
+| **Pre-share / pre-post check** | Shipped |
+| Media / Imagine kit | Shipped |
+| Full SaaS + auth + DB | Out of scope for packs |
 
 ---
 

@@ -273,6 +273,91 @@ export const ORCHESTRATION_LOOPS: OrchestrationLoop[] = [
       },
     ],
   },
+  {
+    id: "ship-ready",
+    name: "Ship-ready polish",
+    description: "Security → design → quality → fix → verify",
+    blurb: "Make sure this won’t embarrass the user: safe, solid, presentable.",
+    preferAutoApprove: false,
+    rules: [
+      "You are running a ship-ready quality loop in Grok Desktop.",
+      "Goal: code that is safe, competent, and not embarrassing to show others.",
+      "Prioritize: secrets/security, crashes, broken UX, typos, amateur layout, missing README.",
+      "Prefer small high-impact fixes over rewrites. Use git-friendly diffs.",
+      "Be honest: if something is not ready to show, say so clearly.",
+    ].join("\n"),
+    steps: [
+      {
+        id: "security",
+        label: "Security",
+        hint: "Secrets, auth, dangerous defaults",
+        buildPrompt: (goal, prior) =>
+          [
+            "STEP: Security audit (read first, list findings).",
+            `Focus: ${goal}`,
+            "Check for: secrets in repo (.env committed, API keys, tokens), unsafe eval, open CORS, missing auth on sensitive routes,",
+            "dependency red flags, path traversal, XSS/injection in user-facing HTML, shell injection, over-broad file permissions.",
+            "Output a severity table: Critical / High / Medium / Low with file paths.",
+            "Do not implement fixes yet unless something is actively leaking secrets right now (then stop the bleed).",
+            joinPrior(prior),
+          ].join("\n"),
+      },
+      {
+        id: "design",
+        label: "Design & UX",
+        hint: "Look professional, not embarrassing",
+        buildPrompt: (goal, prior) =>
+          [
+            "STEP: Design & UX review.",
+            `Focus: ${goal}`,
+            "Review UI copy, layout, mobile, contrast, empty states, error messages, loading states, and consistency.",
+            "Flag anything that looks amateur, placeholder-y (lorem, TODO, 'click here'), or broken on small screens.",
+            "List concrete polish items. Prefer read-only this step; only fix trivial one-line copy if safe.",
+            joinPrior(prior),
+          ].join("\n"),
+      },
+      {
+        id: "quality",
+        label: "Code quality",
+        hint: "Bugs, tests, maintainability",
+        buildPrompt: (goal, prior) =>
+          [
+            "STEP: Code quality pass.",
+            `Focus: ${goal}`,
+            "Look for obvious bugs, dead code, missing error handling, silent failures, broken links, missing README/run steps.",
+            "Note missing smoke tests if critical paths exist. Prioritize what would bite a demo.",
+            joinPrior(prior),
+          ].join("\n"),
+      },
+      {
+        id: "fix",
+        label: "Fix top issues",
+        hint: "High-impact patches only",
+        buildPrompt: (goal, prior) =>
+          [
+            "STEP: Implement top fixes.",
+            `Focus: ${goal}`,
+            "From prior findings, fix Critical and High items first, then the most embarrassing UX issues.",
+            "Keep diffs small and reviewable. Do not drive-by rewrite the architecture.",
+            "If a Critical issue needs a big redesign, document it and fix a safe mitigation instead.",
+            joinPrior(prior),
+          ].join("\n"),
+      },
+      {
+        id: "verify",
+        label: "Verify & handoff",
+        hint: "Demo checklist",
+        buildPrompt: (goal, prior) =>
+          [
+            "STEP: Verify and handoff.",
+            `Focus: ${goal}`,
+            "Run available checks/tests. Produce a DEMO CHECKLIST: how to run, what to click, what not to show yet.",
+            "List residual risks honestly. Confirm no secrets were introduced.",
+            joinPrior(prior),
+          ].join("\n"),
+      },
+    ],
+  },
 ];
 
 export function getLoop(id: string): OrchestrationLoop | undefined {

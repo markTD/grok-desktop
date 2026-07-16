@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { STARTER_PACKS, type StarterPack } from "$lib/packs";
+  import { packsByCategory, type StarterPack } from "$lib/packs";
   import HelpTip from "$lib/components/HelpTip.svelte";
 
   let {
@@ -14,11 +14,13 @@
     onLaunch: (pack: StarterPack, goal: string) => void;
   } = $props();
 
-  let selectedId = $state(STARTER_PACKS[0]?.id ?? "personal-site");
+  const groups = packsByCategory();
+  let selectedId = $state("ship-ready");
   let topic = $state("");
 
   let selected = $derived(
-    STARTER_PACKS.find((p) => p.id === selectedId) ?? STARTER_PACKS[0],
+    groups.flatMap((g) => g.packs).find((p) => p.id === selectedId) ??
+      groups[0]?.packs[0],
   );
 
   function previewGoal(pack: StarterPack): string {
@@ -33,13 +35,14 @@
       <header>
         <div>
           <p class="eyebrow">Starter packs</p>
-          <h2 id="pack-title">What do you want to make?</h2>
+          <h2 id="pack-title">Build · quality · content</h2>
         </div>
         <div class="head">
-          <HelpTip title="Hosting" label="?">
+          <HelpTip title="Hosting & quality" label="?">
             <p>
-              <strong>xAI does not host public websites.</strong> Grok builds code on your machine.
-              Public URLs usually mean GitHub Pages, Netlify, or Vercel — or just run locally.
+              <strong>xAI does not host public websites.</strong> Use
+              <em>Ship-ready</em> / <em>Pre-share</em> before you post a link so secrets and cringe
+              stay off the internet.
             </p>
           </HelpTip>
           <button type="button" class="x" onclick={onClose} aria-label="Close">×</button>
@@ -47,26 +50,31 @@
       </header>
 
       <p class="lead">
-        Popular first projects for SuperGrok / Premium+ users. Pick one, add a short detail, launch.
+        After you build something, run a <strong>quality</strong> pack so it is safe and not
+        embarrassing to show.
       </p>
 
-      <div class="packs">
-        {#each STARTER_PACKS as pack}
-          <button
-            type="button"
-            class="pack"
-            class:on={selectedId === pack.id}
-            onclick={() => (selectedId = pack.id)}
-          >
-            <strong>{pack.title}</strong>
-            <span>{pack.blurb}</span>
-          </button>
-        {/each}
-      </div>
+      {#each groups as group}
+        <h3 class="cat">{group.label}</h3>
+        <div class="packs">
+          {#each group.packs as pack}
+            <button
+              type="button"
+              class="pack"
+              class:on={selectedId === pack.id}
+              class:quality={pack.category === "quality"}
+              onclick={() => (selectedId = pack.id)}
+            >
+              <strong>{pack.title}</strong>
+              <span>{pack.blurb}</span>
+            </button>
+          {/each}
+        </div>
+      {/each}
 
       {#if selected}
         <div class="detail">
-          <p class="why"><strong>Why people pick this:</strong> {selected.why}</p>
+          <p class="why"><strong>Why:</strong> {selected.why}</p>
           <p class="host"><strong>Where it lives:</strong> {selected.hosting}</p>
           <label for="topic">Your detail (optional)</label>
           <input
@@ -107,8 +115,8 @@
   }
 
   .card {
-    width: min(540px, 100%);
-    max-height: min(92vh, 800px);
+    width: min(560px, 100%);
+    max-height: min(92vh, 860px);
     overflow: auto;
     background: #151922;
     border: 1px solid #2a3344;
@@ -141,8 +149,16 @@
     font-size: 1.1rem;
   }
 
+  .cat {
+    margin: 0.85rem 0 0.4rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #a5b4fc;
+  }
+
   .lead {
-    margin: 0.65rem 0 0.75rem;
+    margin: 0.65rem 0 0.25rem;
     font-size: 0.88rem;
     color: #8b93a7;
     line-height: 1.45;
@@ -183,6 +199,11 @@
   .pack.on {
     border-color: #3b82f6;
     background: #1a2744;
+  }
+
+  .pack.quality.on {
+    border-color: #059669;
+    background: #0c1f18;
   }
 
   .pack span {
