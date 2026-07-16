@@ -49,7 +49,7 @@ In-app, not a separate product:
 1. Short “paths” copy: *Create something* vs *Learn this repo* vs *Fix a bug* — **done**  
 2. Tooltips / trust center — **done** (Safety)  
 3. Optional **Explain mode** toggle — **done** (toolbar + More; session rules + per-turn nudge)  
-4. README + 60s GIF for GitHub / portfolio — **GIF still open**  
+4. README + demo GIF/MP4 — **done** (`assets/demo/`)  
 
 **Exit criteria:** A Premium+ friend can use it without you on a call.
 
@@ -119,6 +119,6 @@ Track and update the Grok Build CLI itself from the desktop shell:
 | Build monitor | Done |
 | Trust / safety | Done (keep iterating if users confuse) |
 | E | First 6 packs shipped; voice/media later |
-| Optional next | Demo GIF · more packs · use-testing |
+| Optional next | Live-window recording if desired · use-testing · more packs |
 
 Last updated: 2026-07-15

@@ -1,5 +1,9 @@
 # Grok Desktop
 
+<p align="center">
+  <img src="assets/app-icon-128.png" width="96" height="96" alt="Grok Desktop icon" />
+</p>
+
 **A friendly desktop shell for [xAI Grok Build](https://x.ai/cli)** — so SuperGrok / X Premium+ users can create and learn without living in a TUI.
 
 ```
@@ -9,6 +13,19 @@ You (UI)  ──ACP──►  grok agent stdio  ──►  tools · MCP · model
 This app does **not** reimplement the coding agent. It is a thin client around the official `grok` CLI.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+## Demo
+
+![Grok Desktop demo](assets/demo/grok-desktop-demo.gif)
+
+*Walkthrough: home → Safety → starter packs → loop stream → finish + export.*  
+Also available as [MP4](assets/demo/grok-desktop-demo.mp4) (~13s).
+
+<p align="center">
+  <img src="assets/screenshot-home.png" width="720" alt="Grok Desktop home" />
+</p>
+
+> Demo frames are a faithful UI mock of the shipping app (for a reliable, lightweight GIF). Run the real app with `npm run tauri dev`.
 
 ---
 

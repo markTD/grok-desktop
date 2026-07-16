@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Grok Desktop Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, system-ui, -apple-system, sans-serif;
+      background: #07080a;
+      color: #e8eaed;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .frame {
+      width: 1040px;
+      height: 680px;
+      border-radius: 14px;
+      border: 1px solid #2a3344;
+      background: #0d0f12;
+      overflow: hidden;
+      box-shadow: 0 30px 80px rgba(0,0,0,.55);
+      display: none;
+      flex-direction: column;
+    }
+    .frame.active { display: flex; }
+    .titlebar {
+      height: 42px;
+      background: #12151a;
+      border-bottom: 1px solid #1e2430;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .mark {
+      width: 22px; height: 22px; border-radius: 6px;
+      background: linear-gradient(145deg, #1a2744, #0d0f12);
+      border: 1px solid #3b82f6;
+      display: grid; place-items: center;
+      color: #7dd3fc; font-size: 12px;
+    }
+    .brand h1 { font-size: 14px; font-weight: 600; }
+    .brand p { font-size: 11px; color: #8b93a7; }
+    .pills { display: flex; gap: 6px; align-items: center; }
+    .pill {
+      font-size: 10px; padding: 3px 8px; border-radius: 999px;
+      border: 1px solid #334155; background: #1e293b; color: #a5b4fc;
+    }
+    .pill.ok { color: #86efac; border-color: #166534; background: #0f2a1f; }
+    .pill.warn { color: #fde68a; border-color: #854d0e; background: #2a2110; }
+    .toolbar {
+      padding: 10px 14px; border-bottom: 1px solid #1e2430; background: #10141b;
+      display: flex; gap: 8px; align-items: center;
+    }
+    .cwd {
+      flex: 1; font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+      background: #0d0f12; border: 1px solid #2a3344; border-radius: 8px;
+      padding: 8px 10px; color: #c5cad6;
+    }
+    .btn {
+      border: 1px solid #2a3344; background: #1a2030; color: #e8eaed;
+      border-radius: 8px; padding: 7px 12px; font-size: 12px; white-space: nowrap;
+    }
+    .btn.primary { background: #1d4ed8; border-color: #2563eb; }
+    .btn.accent { background: #0f766e; border-color: #14b8a6; }
+    .paths {
+      padding: 8px 14px; border-bottom: 1px solid #1e2430; background: #0e1218;
+      display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+    }
+    .paths span { font-size: 10px; color: #8b93a7; text-transform: uppercase; letter-spacing: .04em; }
+    .chip {
+      border: 1px solid #2a3344; background: #151922; color: #e8eaed;
+      border-radius: 999px; padding: 5px 10px; font-size: 11px;
+    }
+    .chip.hi { border-color: #2563eb; background: #1a2744; color: #bfdbfe; }
+    .main { flex: 1; display: flex; min-height: 0; }
+    .chat {
+      flex: 1; padding: 16px; overflow: hidden; display: flex; flex-direction: column; gap: 10px;
+    }
+    .bubble {
+      max-width: 72%; border-radius: 12px; padding: 10px 12px;
+      border: 1px solid #232a38; font-size: 13px; line-height: 1.45;
+    }
+    .user { align-self: flex-end; background: #1a2744; border-color: #2a3f66; }
+    .asst { align-self: flex-start; background: #151922; }
+    .sys {
+      align-self: center; border-style: dashed; color: #8b93a7; font-size: 11px; background: transparent;
+    }
+    .loop {
+      align-self: center; background: #13221f; border-color: #1e4d3f; color: #6ee7b7; font-size: 12px;
+      white-space: pre-wrap; max-width: 80%;
+    }
+    .thought {
+      align-self: flex-start; background: #14131c; border-color: #2e2a44; color: #a8a3c4; font-size: 12px;
+    }
+    .hdr { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #8b93a7; margin-bottom: 4px; }
+    .composer {
+      border-top: 1px solid #1e2430; background: #12151a; padding: 12px 14px;
+      display: flex; gap: 8px;
+    }
+    .composer div {
+      flex: 1; border: 1px solid #2a3344; background: #0d0f12; border-radius: 10px;
+      padding: 10px 12px; color: #8b93a7; font-size: 13px;
+    }
+    .overlay {
+      position: absolute; inset: 0; background: rgba(0,0,0,.55);
+      display: grid; place-items: center;
+    }
+    .modal {
+      width: 440px; background: #151922; border: 1px solid #2a3344; border-radius: 14px;
+      padding: 18px 20px; box-shadow: 0 20px 50px rgba(0,0,0,.5);
+    }
+    .modal h2 { font-size: 16px; margin-bottom: 8px; }
+    .modal p { font-size: 13px; color: #c5cad6; line-height: 1.5; margin-bottom: 10px; }
+    .modal .eyebrow { font-size: 11px; color: #fbbf24; text-transform: uppercase; letter-spacing: .05em; }
+    .board { display: grid; gap: 6px; margin: 10px 0; }
+    .rowc {
+      border: 1px solid #2a3344; border-radius: 8px; padding: 8px 10px; font-size: 12px; background: #0d0f12;
+    }
+    .rowc.red { border-color: #7f1d1d; background: #1c1010; }
+    .rowc.green { border-color: #166534; background: #0c1610; color: #bbf7d0; }
+    .rowc.yellow { border-color: #854d0e; background: #1a160c; color: #fde68a; }
+    .wrap { position: relative; width: 1040px; height: 680px; }
+    .caption {
+      position: absolute; left: 16px; bottom: 16px; z-index: 5;
+      background: rgba(0,0,0,.7); border: 1px solid #334155; border-radius: 8px;
+      padding: 6px 10px; font-size: 12px; color: #e2e8f0;
+    }
+    .status-line { font-size: 12px; color: #86efac; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Scene 1: empty / start -->
+    <div class="frame active" id="s1">
+      <div class="titlebar">
+        <div class="brand">
+          <div class="mark">◈</div>
+          <div>
+            <h1>Grok Desktop</h1>
+            <p>CLI ready — pick a path below</p>
+          </div>
+        </div>
+        <div class="pills">
+          <span class="pill ok">0.2.101</span>
+          <span class="pill warn">Safety</span>
+          <span class="pill">More</span>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="cwd">/Users/you/projects/my-app</div>
+        <span class="btn">Browse…</span>
+        <span class="btn">Explain</span>
+        <span class="btn accent">Packs</span>
+        <span class="btn accent">Loops</span>
+        <span class="btn primary">Connect</span>
+      </div>
+      <div class="paths">
+        <span>Start</span>
+        <span class="chip hi">Starter packs</span>
+        <span class="chip">Create something</span>
+        <span class="chip">Learn this repo</span>
+        <span class="chip">Fix a bug</span>
+      </div>
+      <div class="chat" style="justify-content:center;align-items:center;text-align:center;">
+        <h2 style="font-size:18px;margin-bottom:10px;">Build with Grok — without the terminal fight</h2>
+        <p style="color:#8b93a7;max-width:420px;line-height:1.5;font-size:13px;">
+          Project → Starter packs → Explain if you want teaching → Safety for data transparency.
+          xAI does not host sites; run local or deploy to Pages/Vercel/Netlify.
+        </p>
+      </div>
+      <div class="composer"><div>Connect, Kickoff, or Packs first</div><span class="btn primary">Send</span></div>
+      <div class="caption">1 · Open Grok Desktop</div>
+    </div>
+
+    <!-- Scene 2: Safety -->
+    <div class="frame" id="s2">
+      <div class="titlebar">
+        <div class="brand">
+          <div class="mark">◈</div>
+          <div><h1>Grok Desktop</h1><p>Trust center</p></div>
+        </div>
+      </div>
+      <div class="main" style="position:relative;">
+        <div class="overlay">
+          <div class="modal">
+            <div class="eyebrow">Trust center</div>
+            <h2>Data status · harness · guardrails</h2>
+            <p>Will it send my whole codebase? Not all at once — files the agent opens can go to xAI via Grok Build.</p>
+            <div class="board">
+              <div class="rowc red"><strong>Chat &amp; answers</strong> → xAI</div>
+              <div class="rowc red"><strong>Files the agent reads</strong> → can leave machine</div>
+              <div class="rowc green"><strong>Grok Desktop cloud</strong> → none</div>
+              <div class="rowc yellow"><strong>Product analytics</strong> → OFF / ON / NOT SURE</div>
+            </div>
+            <div class="status-line">I understand the data status — continue</div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">2 · Safety / data transparency</div>
+    </div>
+
+    <!-- Scene 3: Packs -->
+    <div class="frame" id="s3">
+      <div class="titlebar">
+        <div class="brand">
+          <div class="mark">◈</div>
+          <div><h1>Grok Desktop</h1><p>Starter packs</p></div>
+        </div>
+      </div>
+      <div class="main" style="position:relative;">
+        <div class="overlay">
+          <div class="modal" style="width:480px;">
+            <div class="eyebrow">Starter packs</div>
+            <h2>Build · quality · content</h2>
+            <p>After you build, run a quality pack so it is safer and less embarrassing to show.</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0;">
+              <div class="rowc" style="border-color:#3b82f6;">Personal website</div>
+              <div class="rowc" style="border-color:#059669;color:#86efac;">Ship-ready check</div>
+              <div class="rowc" style="border-color:#059669;color:#86efac;">Security audit</div>
+              <div class="rowc" style="border-color:#059669;color:#86efac;">Pre-share check</div>
+            </div>
+            <p style="font-size:12px;color:#fde68a;">Caveat: AI review is not a formal security audit. Always git diff.</p>
+          </div>
+        </div>
+      </div>
+      <div class="caption">3 · Starter packs (build + quality)</div>
+    </div>
+
+    <!-- Scene 4: Loop running -->
+    <div class="frame" id="s4">
+      <div class="titlebar">
+        <div class="brand">
+          <div class="mark">◈</div>
+          <div>
+            <h1>Grok Desktop</h1>
+            <p>Session 019f… · grok-4.5 · explain</p>
+          </div>
+        </div>
+        <div class="pills">
+          <span class="pill ok">connected</span>
+          <span class="pill">2 turns · 48k tokens</span>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="cwd">/Users/you/projects/my-app</div>
+        <span class="btn">main</span>
+        <span class="btn danger" style="background:#3f1d1d;border-color:#7f1d1d;">Disconnect</span>
+      </div>
+      <div class="chat">
+        <div class="bubble loop">▶ Starting loop: Ship-ready check
+Goal: polish before public share
+Steps: Security → Design → Quality → Fix → Verify</div>
+        <div class="bubble sys">Loop · step 1 of 5: Security</div>
+        <div class="bubble thought">
+          <div class="hdr">Thinking</div>
+          Scanning for committed secrets, risky shell use, and open endpoints…
+        </div>
+        <div class="bubble asst">
+          <div class="hdr">Grok</div>
+          <strong>Security findings</strong><br/>
+          • High: none<br/>
+          • Medium: missing .gitignore for .env.local<br/>
+          • Low: verbose error in catch block<br/>
+          Next I’ll fix the Medium items with a small diff.
+        </div>
+      </div>
+      <div class="composer"><div>Loop running — wait or Cancel…</div><span class="btn" style="background:#3f1d1d;border-color:#7f1d1d;">Cancel</span></div>
+      <div class="caption">4 · Loops stream tools, thoughts, results</div>
+    </div>
+
+    <!-- Scene 5: Done + export -->
+    <div class="frame" id="s5">
+      <div class="titlebar">
+        <div class="brand">
+          <div class="mark">◈</div>
+          <div>
+            <h1>Grok Desktop</h1>
+            <p>Session 019f… · explain</p>
+          </div>
+        </div>
+      </div>
+      <div class="chat">
+        <div class="bubble loop">✓ LOOP FINISHED — Ship-ready check
+Completed: Security → Design → Quality → Fix → Verify → Wrap-up
+
+Tip: Export notes → .grok-desktop/notes/</div>
+        <div class="bubble asst">
+          <div class="hdr">Grok</div>
+          <strong>Demo checklist</strong><br/>
+          1. npm run dev<br/>
+          2. Open Safety once<br/>
+          3. git diff before you post a link<br/><br/>
+          <em>Verdict: SHARE WITH CAVEATS</em> — AI review is not a formal audit.
+        </div>
+        <div class="bubble sys">Notes exported → …/my-app/.grok-desktop/notes/session-….md</div>
+      </div>
+      <div class="composer"><div>Message Grok Build…</div><span class="btn primary">Send</span></div>
+      <div class="caption">5 · Finish · export · share with caveats</div>
+    </div>
+  </div>
+
+  <script>
+    const ids = ["s1", "s2", "s3", "s4", "s5"];
+    let i = 0;
+    const params = new URLSearchParams(location.search);
+    const scene = parseInt(params.get("scene") || "1", 10);
+    if (scene >= 1 && scene <= 5) {
+      document.querySelectorAll(".frame").forEach((el) => el.classList.remove("active"));
+      document.getElementById("s" + scene).classList.add("active");
+    }
+    // auto-rotate for video capture if ?auto=1
+    if (params.get("auto") === "1") {
+      setInterval(() => {
+        document.querySelectorAll(".frame").forEach((el) => el.classList.remove("active"));
+        i = (i + 1) % ids.length;
+        document.getElementById(ids[i]).classList.add("active");
+      }, 2200);
+    }
+  </script>
+</body>
+</html>
