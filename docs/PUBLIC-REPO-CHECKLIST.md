@@ -9,8 +9,10 @@ Use before promoting this repository or any project built with the app.
 - [x] `.gitignore` covers env, keys, `.grok-desktop/` notes  
 - [x] `SECURITY.md` present  
 - [x] Safety / data docs present  
-- [ ] Spot-check `git log` / diffs for accidental paths or tokens before big announcements  
-- [ ] Optional: demo GIF (still open)  
+- [x] Spot-check `git log` / diffs for accidental paths or tokens  
+- [x] History scrubbed of local home paths (`/Users/…`)  
+- [x] No username fingerprint in app id, authors, license, or docs  
+- [x] Demo GIF/MP4 shipped under `assets/demo/`  
 
 ```bash
 rg -n -i 'api[_-]?key|secret|password|sk-|ghp_|BEGIN |/Users/' \
